@@ -24,9 +24,20 @@ const statusLabel: Record<string, string> = {
   error: "失败",
 };
 
+const sourceLabel: Record<string, string> = {
+  file: "文件",
+  camera: "摄像头",
+  display: "桌面",
+};
+
+const isFile = computed(() => props.stream.sourceType === "file");
+
 const progressText = computed(() => {
-  const { elapsedSecs, durationSecs, loopEnabled } = props.stream;
+  const { elapsedSecs, durationSecs, loopEnabled, sourceType } = props.stream;
   const elapsed = formatTime(elapsedSecs);
+  if (sourceType !== "file") {
+    return `${elapsed}（直播）`;
+  }
   if (durationSecs == null) return elapsed;
   const total = formatTime(durationSecs);
   return loopEnabled ? `${elapsed} / ${total}（循环）` : `${elapsed} / ${total}`;
@@ -59,7 +70,10 @@ async function copy(label: string, text: string) {
 <template>
   <tr :class="stream.status">
     <td class="name">
-      <div class="filename">{{ stream.filename }}</div>
+      <div class="filename">
+        <span class="source-tag">{{ sourceLabel[stream.sourceType] }}</span>
+        {{ stream.filename }}
+      </div>
       <div class="id">{{ stream.id }}</div>
     </td>
     <td>
@@ -92,24 +106,27 @@ async function copy(label: string, text: string) {
       </div>
     </td>
     <td class="opts">
-      <label class="check">
-        <input
-          type="checkbox"
-          :checked="stream.loopEnabled"
-          :disabled="stream.status === 'running'"
-          @change="$emit('toggleLoop', ($event.target as HTMLInputElement).checked)"
-        />
-        循环
-      </label>
-      <label class="check">
-        <input
-          type="checkbox"
-          :checked="stream.copyMode"
-          :disabled="stream.status === 'running'"
-          @change="$emit('toggleCopy', ($event.target as HTMLInputElement).checked)"
-        />
-        Copy
-      </label>
+      <template v-if="isFile">
+        <label class="check">
+          <input
+            type="checkbox"
+            :checked="stream.loopEnabled"
+            :disabled="stream.status === 'running'"
+            @change="$emit('toggleLoop', ($event.target as HTMLInputElement).checked)"
+          />
+          循环
+        </label>
+        <label class="check">
+          <input
+            type="checkbox"
+            :checked="stream.copyMode"
+            :disabled="stream.status === 'running'"
+            @change="$emit('toggleCopy', ($event.target as HTMLInputElement).checked)"
+          />
+          Copy
+        </label>
+      </template>
+      <span v-else class="live-hint">实时转码</span>
     </td>
     <td class="actions">
       <button
@@ -136,6 +153,21 @@ tr.error {
 }
 .name .filename {
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.source-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #111d2c;
+  color: #69b1ff;
+  flex-shrink: 0;
+}
+.live-hint {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 .name .id {
   font-size: 11px;

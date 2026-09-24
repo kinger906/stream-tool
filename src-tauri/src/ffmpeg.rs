@@ -1,4 +1,4 @@
-use crate::models::RTSP_PORT;
+use crate::models::{InternalStreamTask, RTSP_PORT, SourceType};
 use regex::Regex;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -53,53 +53,153 @@ pub fn summarize_error(stderr: &str) -> String {
                 || lower.contains("invalid")
                 || lower.contains("failed")
                 || lower.contains("no such file")
+                || lower.contains("cannot find")
         })
         .or_else(|| lines.last())
         .map(|line| line.trim().to_string())
         .unwrap_or_else(|| "FFmpeg 推流失败".to_string())
 }
 
-pub fn build_stream_args(
-    file_path: &Path,
-    stream_id: &str,
-    loop_enabled: bool,
-    transcode: bool,
-) -> Vec<String> {
-    let mut args = vec!["-hide_banner".to_string(), "-loglevel".to_string(), "warning".to_string()];
+fn rtsp_output(stream_id: &str) -> Vec<String> {
+    vec![
+        "-f".to_string(),
+        "rtsp".to_string(),
+        "-rtsp_transport".to_string(),
+        "tcp".to_string(),
+        format!("rtsp://127.0.0.1:{RTSP_PORT}/{stream_id}"),
+    ]
+}
 
-    if loop_enabled {
+fn transcode_video_args() -> Vec<String> {
+    vec![
+        "-c:v".to_string(),
+        "libx264".to_string(),
+        "-preset".to_string(),
+        "veryfast".to_string(),
+        "-tune".to_string(),
+        "zerolatency".to_string(),
+        "-pix_fmt".to_string(),
+        "yuv420p".to_string(),
+    ]
+}
+
+fn transcode_audio_args() -> Vec<String> {
+    vec![
+        "-c:a".to_string(),
+        "aac".to_string(),
+        "-ar".to_string(),
+        "44100".to_string(),
+        "-ac".to_string(),
+        "2".to_string(),
+    ]
+}
+
+pub fn build_stream_args(task: &InternalStreamTask, stream_id: &str, transcode: bool) -> Vec<String> {
+    match task.source_type {
+        SourceType::File => build_file_stream_args(task, stream_id, transcode),
+        SourceType::Camera => build_camera_stream_args(task, stream_id),
+        SourceType::Display => build_display_stream_args(task, stream_id),
+    }
+}
+
+fn build_file_stream_args(task: &InternalStreamTask, stream_id: &str, transcode: bool) -> Vec<String> {
+    let mut args = vec![
+        "-hide_banner".to_string(),
+        "-loglevel".to_string(),
+        "warning".to_string(),
+    ];
+
+    if task.loop_enabled {
         args.push("-stream_loop".to_string());
         args.push("-1".to_string());
     }
 
     args.push("-re".to_string());
     args.push("-i".to_string());
-    args.push(file_path.display().to_string());
+    args.push(task.path.display().to_string());
 
     if transcode {
-        args.extend([
-            "-c:v".to_string(),
-            "libx264".to_string(),
-            "-preset".to_string(),
-            "veryfast".to_string(),
-            "-tune".to_string(),
-            "zerolatency".to_string(),
-            "-c:a".to_string(),
-            "aac".to_string(),
-        ]);
+        args.extend(transcode_video_args());
+        args.extend(transcode_audio_args());
     } else {
         args.push("-c".to_string());
         args.push("copy".to_string());
     }
 
-    args.extend([
-        "-f".to_string(),
-        "rtsp".to_string(),
-        "-rtsp_transport".to_string(),
-        "tcp".to_string(),
-        format!("rtsp://127.0.0.1:{RTSP_PORT}/{stream_id}"),
-    ]);
+    args.extend(rtsp_output(stream_id));
+    args
+}
 
+fn build_camera_stream_args(task: &InternalStreamTask, stream_id: &str) -> Vec<String> {
+    let video = task.path.to_string_lossy();
+    let mut args = vec![
+        "-hide_banner".to_string(),
+        "-loglevel".to_string(),
+        "warning".to_string(),
+        "-f".to_string(),
+        "dshow".to_string(),
+        "-video_size".to_string(),
+        "1280x720".to_string(),
+        "-framerate".to_string(),
+        "30".to_string(),
+    ];
+
+    let input = match &task.audio_device {
+        Some(audio) => format!("video={video}:audio={audio}"),
+        None => format!("video={video}"),
+    };
+    args.push("-i".to_string());
+    args.push(input);
+
+    args.extend(transcode_video_args());
+    if task.audio_device.is_some() {
+        args.extend(transcode_audio_args());
+    } else {
+        args.push("-an".to_string());
+    }
+
+    args.extend(rtsp_output(stream_id));
+    args
+}
+
+fn build_display_stream_args(task: &InternalStreamTask, stream_id: &str) -> Vec<String> {
+    let mut args = vec![
+        "-hide_banner".to_string(),
+        "-loglevel".to_string(),
+        "warning".to_string(),
+        "-f".to_string(),
+        "gdigrab".to_string(),
+        "-framerate".to_string(),
+        "25".to_string(),
+        "-draw_mouse".to_string(),
+        "1".to_string(),
+        "-i".to_string(),
+        "desktop".to_string(),
+    ];
+
+    if let Some(audio) = &task.audio_device {
+        args.extend([
+            "-f".to_string(),
+            "dshow".to_string(),
+            "-i".to_string(),
+            format!("audio={audio}"),
+        ]);
+    }
+
+    args.extend(transcode_video_args());
+    if task.audio_device.is_some() {
+        args.extend(transcode_audio_args());
+        args.extend([
+            "-map".to_string(),
+            "0:v".to_string(),
+            "-map".to_string(),
+            "1:a".to_string(),
+        ]);
+    } else {
+        args.push("-an".to_string());
+    }
+
+    args.extend(rtsp_output(stream_id));
     args
 }
 

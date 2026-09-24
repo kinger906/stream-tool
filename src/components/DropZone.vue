@@ -2,7 +2,12 @@
 import { ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 
-const emit = defineEmits<{ add: [paths: string[]] }>();
+const emit = defineEmits<{
+  add: [paths: string[]];
+  addCamera: [];
+  addDisplay: [];
+}>();
+
 const dragging = ref(false);
 
 const videoExt = /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts)$/i;
@@ -14,7 +19,12 @@ function filterVideos(paths: string[]) {
 async function pickFiles() {
   const selected = await open({
     multiple: true,
-    filters: [{ name: "视频", extensions: ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "ts"] }],
+    filters: [
+      {
+        name: "视频",
+        extensions: ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "ts"],
+      },
+    ],
   });
   if (!selected) return;
   const paths = Array.isArray(selected) ? selected : [selected];
@@ -26,7 +36,9 @@ function onDrop(e: DragEvent) {
   e.preventDefault();
   const files = e.dataTransfer?.files;
   if (!files?.length) return;
-  const paths = filterVideos(Array.from(files).map((f) => (f as File & { path?: string }).path || f.name));
+  const paths = filterVideos(
+    Array.from(files).map((f) => (f as File & { path?: string }).path || f.name),
+  );
   if (paths.length) emit("add", paths);
 }
 
@@ -47,14 +59,19 @@ function onDragLeave() {
     @drop="onDrop"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
-    @click="pickFiles"
   >
-    <div class="icon">+</div>
-    <p>拖拽视频到此处，或点击选择文件</p>
-    <p class="hint">支持多文件并行推流，每路生成独立 RTSP / HLS 地址</p>
-    <div class="future">
-      <span class="tag soon">摄像头（即将支持）</span>
-      <span class="tag soon">桌面采集（即将支持）</span>
+    <div class="main" @click="pickFiles">
+      <div class="icon">+</div>
+      <p>拖拽视频到此处，或点击选择文件</p>
+      <p class="hint">支持多文件并行推流，每路生成独立 RTSP / HLS 地址</p>
+    </div>
+    <div class="sources">
+      <button class="btn source" type="button" @click.stop="emit('addCamera')">
+        摄像头推流
+      </button>
+      <button class="btn source" type="button" @click.stop="emit('addDisplay')">
+        桌面采集推流
+      </button>
     </div>
   </div>
 </template>
@@ -63,9 +80,8 @@ function onDragLeave() {
 .dropzone {
   border: 2px dashed var(--border);
   border-radius: 12px;
-  padding: 28px;
+  padding: 24px;
   text-align: center;
-  cursor: pointer;
   background: var(--surface);
   transition: border-color 0.2s, background 0.2s;
 }
@@ -73,6 +89,9 @@ function onDragLeave() {
 .dropzone.active {
   border-color: var(--accent);
   background: var(--surface-2);
+}
+.main {
+  cursor: pointer;
 }
 .icon {
   font-size: 28px;
@@ -84,18 +103,14 @@ function onDragLeave() {
   font-size: 13px;
   margin-top: 6px;
 }
-.future {
-  margin-top: 14px;
+.sources {
+  margin-top: 16px;
   display: flex;
-  gap: 8px;
+  gap: 10px;
   justify-content: center;
 }
-.tag.soon {
-  font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: var(--surface-2);
-  color: var(--text-muted);
-  border: 1px dashed var(--border);
+.btn.source {
+  border-color: var(--accent);
+  color: #69b1ff;
 }
 </style>

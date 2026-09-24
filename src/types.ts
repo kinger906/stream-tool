@@ -1,6 +1,15 @@
 export type StreamStatus = "idle" | "running" | "stopped" | "error";
 export type SourceType = "file" | "camera" | "display";
 
+export interface CaptureDevice {
+  name: string;
+}
+
+export interface CaptureDevices {
+  video: CaptureDevice[];
+  audio: CaptureDevice[];
+}
+
 export interface StreamTaskInfo {
   id: string;
   filename: string;
@@ -9,6 +18,7 @@ export interface StreamTaskInfo {
   status: StreamStatus;
   loopEnabled: boolean;
   copyMode: boolean;
+  audioDevice: string | null;
   rtspUrl: string;
   hlsUrl: string;
   rtspUrlLocal: string;

@@ -23,6 +23,19 @@ pub enum SourceType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CaptureDevice {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureDevices {
+    pub video: Vec<CaptureDevice>,
+    pub audio: Vec<CaptureDevice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StreamTaskInfo {
     pub id: String,
     pub filename: String,
@@ -31,6 +44,7 @@ pub struct StreamTaskInfo {
     pub status: StreamStatus,
     pub loop_enabled: bool,
     pub copy_mode: bool,
+    pub audio_device: Option<String>,
     pub rtsp_url: String,
     pub hls_url: String,
     pub rtsp_url_local: String,
@@ -80,6 +94,7 @@ pub struct InternalStreamTask {
     pub status: StreamStatus,
     pub loop_enabled: bool,
     pub copy_mode: bool,
+    pub audio_device: Option<String>,
     pub error: Option<String>,
     pub elapsed_secs: f64,
     pub duration_secs: Option<f64>,
@@ -97,6 +112,7 @@ impl InternalStreamTask {
             status: self.status.clone(),
             loop_enabled: self.loop_enabled,
             copy_mode: self.copy_mode,
+            audio_device: self.audio_device.clone(),
             rtsp_url: format!("rtsp://{lan_ip}:{RTSP_PORT}/{id}"),
             hls_url: format!("http://{lan_ip}:{HLS_PORT}/{id}/index.m3u8"),
             rtsp_url_local: format!("rtsp://127.0.0.1:{RTSP_PORT}/{id}"),

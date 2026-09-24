@@ -39,6 +39,29 @@ export function useStreams() {
     }
   }
 
+  async function addCamera(videoDevice: string, audioDevice: string | null) {
+    error.value = null;
+    try {
+      await api.addCameraStream(
+        videoDevice,
+        audioDevice ?? undefined,
+      );
+      await refresh();
+    } catch (e) {
+      error.value = String(e);
+    }
+  }
+
+  async function addDisplay(audioDevice: string | null) {
+    error.value = null;
+    try {
+      await api.addDisplayStream(audioDevice ?? undefined);
+      await refresh();
+    } catch (e) {
+      error.value = String(e);
+    }
+  }
+
   async function start(id: string) {
     error.value = null;
     try {
@@ -113,6 +136,8 @@ export function useStreams() {
     error,
     refresh,
     addPaths,
+    addCamera,
+    addDisplay,
     start,
     stop,
     startAll,

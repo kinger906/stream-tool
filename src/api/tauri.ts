@@ -1,10 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppSettings, StreamTaskInfo, SystemInfo } from "../types";
+import type { AppSettings, CaptureDevices, StreamTaskInfo, SystemInfo } from "../types";
 
 export const api = {
   getSystemInfo: () => invoke<SystemInfo>("get_system_info"),
   listStreams: () => invoke<StreamTaskInfo[]>("list_streams"),
   addStreams: (paths: string[]) => invoke<StreamTaskInfo[]>("add_streams", { paths }),
+  listCaptureDevices: () => invoke<CaptureDevices>("list_capture_devices"),
+  addCameraStream: (videoDevice: string, audioDevice?: string) =>
+    invoke<StreamTaskInfo>("add_camera_stream", {
+      videoDevice,
+      audioDevice: audioDevice ?? null,
+    }),
+  addDisplayStream: (audioDevice?: string) =>
+    invoke<StreamTaskInfo>("add_display_stream", {
+      audioDevice: audioDevice ?? null,
+    }),
   startStream: (id: string) => invoke<StreamTaskInfo>("start_stream", { id }),
   stopStream: (id: string) => invoke<StreamTaskInfo>("stop_stream", { id }),
   startAllStreams: () => invoke<StreamTaskInfo[]>("start_all_streams"),

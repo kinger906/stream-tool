@@ -1,3 +1,4 @@
+mod capture;
 mod commands;
 mod ffmpeg;
 mod mediamtx;
@@ -21,6 +22,9 @@ pub fn run() {
             commands::get_system_info,
             commands::list_streams,
             commands::add_streams,
+            commands::list_capture_devices,
+            commands::add_camera_stream,
+            commands::add_display_stream,
             commands::start_stream,
             commands::stop_stream,
             commands::start_all_streams,

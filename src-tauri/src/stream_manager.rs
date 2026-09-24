@@ -8,7 +8,7 @@ use crate::models::{
 };
 use local_ip_address::local_ip;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -61,9 +61,19 @@ impl StreamManager {
             .collect()
     }
 
+    fn next_id(&self) -> String {
+        Uuid::new_v4().simple().to_string()[..8].to_string()
+    }
+
+    fn insert_task(&self, task: InternalStreamTask) -> StreamTaskInfo {
+        let lan_ip = self.lan_ip();
+        let info = task.to_info(&lan_ip);
+        self.tasks.lock().unwrap().insert(task.id.clone(), task);
+        info
+    }
+
     pub fn add_files(&self, paths: Vec<String>) -> Result<Vec<StreamTaskInfo>, String> {
         let mut added = Vec::new();
-        let lan_ip = self.lan_ip();
 
         for path_str in paths {
             let path = PathBuf::from(&path_str);
@@ -76,29 +86,86 @@ impl StreamManager {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| path_str.clone());
 
-            let id = Uuid::new_v4().simple().to_string()[..8].to_string();
-
             let task = InternalStreamTask {
-                id: id.clone(),
+                id: self.next_id(),
                 path: path.clone(),
                 filename,
                 source_type: SourceType::File,
                 status: StreamStatus::Idle,
                 loop_enabled: true,
                 copy_mode: true,
+                audio_device: None,
                 error: None,
                 elapsed_secs: 0.0,
                 duration_secs: None,
                 using_transcode: false,
             };
 
-            self.tasks.lock().unwrap().insert(id.clone(), task);
-            if let Some(info) = self.tasks.lock().unwrap().get(&id).map(|t| t.to_info(&lan_ip)) {
-                added.push(info);
-            }
+            added.push(self.insert_task(task));
         }
 
         Ok(added)
+    }
+
+    pub fn add_camera_stream(
+        &self,
+        video_device: String,
+        audio_device: Option<String>,
+    ) -> Result<StreamTaskInfo, String> {
+        if video_device.trim().is_empty() {
+            return Err("请选择摄像头".to_string());
+        }
+
+        let label = if let Some(audio) = &audio_device {
+            format!("摄像头: {video_device} + {audio}")
+        } else {
+            format!("摄像头: {video_device}")
+        };
+
+        let task = InternalStreamTask {
+            id: self.next_id(),
+            path: PathBuf::from(video_device.clone()),
+            filename: label,
+            source_type: SourceType::Camera,
+            status: StreamStatus::Idle,
+            loop_enabled: false,
+            copy_mode: false,
+            audio_device,
+            error: None,
+            elapsed_secs: 0.0,
+            duration_secs: None,
+            using_transcode: true,
+        };
+
+        Ok(self.insert_task(task))
+    }
+
+    pub fn add_display_stream(
+        &self,
+        audio_device: Option<String>,
+    ) -> Result<StreamTaskInfo, String> {
+        let label = if let Some(audio) = &audio_device {
+            format!("桌面采集 + {audio}")
+        } else {
+            "桌面采集".to_string()
+        };
+
+        let task = InternalStreamTask {
+            id: self.next_id(),
+            path: PathBuf::from("desktop"),
+            filename: label,
+            source_type: SourceType::Display,
+            status: StreamStatus::Idle,
+            loop_enabled: false,
+            copy_mode: false,
+            audio_device,
+            error: None,
+            elapsed_secs: 0.0,
+            duration_secs: None,
+            using_transcode: true,
+        };
+
+        Ok(self.insert_task(task))
     }
 
     pub fn remove_stream(&self, id: &str) -> Result<(), String> {
@@ -118,6 +185,10 @@ impl StreamManager {
 
         if task.status == StreamStatus::Running {
             return Err("推流进行中，无法修改设置".to_string());
+        }
+
+        if task.source_type != SourceType::File {
+            return Err("仅文件推流支持修改循环/Copy 设置".to_string());
         }
 
         if let Some(v) = loop_enabled {
@@ -147,11 +218,7 @@ impl StreamManager {
             crate::mediamtx::start(app, mediamtx)?;
         }
 
-        let running_count = self
-            .processes
-            .lock()
-            .unwrap()
-            .len();
+        let running_count = self.processes.lock().unwrap().len();
         let max = self.settings.lock().unwrap().max_concurrent;
         if running_count >= max {
             return Err(format!("已达并发上限 ({max})，请先停止其它推流或提高上限"));
@@ -161,36 +228,26 @@ impl StreamManager {
             return Err("该任务已在推流中".to_string());
         }
 
-        let (path, loop_enabled, copy_mode) = {
+        let task_snapshot = {
             let mut tasks = self.tasks.lock().unwrap();
             let task = tasks.get_mut(id).ok_or_else(|| "任务不存在".to_string())?;
-            if task.source_type != SourceType::File {
-                return Err("该来源类型尚未支持".to_string());
-            }
             task.status = StreamStatus::Running;
             task.error = None;
             task.elapsed_secs = 0.0;
-            task.using_transcode = !task.copy_mode;
-            (
-                task.path.clone(),
-                task.loop_enabled,
-                !task.copy_mode,
-            )
+            if task.source_type == SourceType::File {
+                task.using_transcode = !task.copy_mode;
+            } else {
+                task.using_transcode = true;
+            }
+            task.clone_snapshot()
         };
 
         let app_clone = app.clone();
         let id_owned = id.to_string();
 
-        match self.spawn_ffmpeg(
-            app.clone(),
-            &id_owned,
-            &path,
-            loop_enabled,
-            copy_mode,
-            move |stream_id, stderr, exit_code| {
-                Self::handle_process_exit(&app_clone, &stream_id, &stderr, exit_code);
-            },
-        ) {
+        match self.spawn_ffmpeg(app.clone(), &id_owned, &task_snapshot, move |stream_id, stderr, exit_code| {
+            Self::handle_process_exit(&app_clone, &stream_id, &stderr, exit_code);
+        }) {
             Ok(()) => {}
             Err(err) => {
                 let mut tasks = self.tasks.lock().unwrap();
@@ -202,7 +259,9 @@ impl StreamManager {
             }
         }
 
-        self.probe_duration_async(app.clone(), id.to_string(), path);
+        if task_snapshot.source_type == SourceType::File {
+            self.probe_duration_async(app.clone(), id.to_string(), task_snapshot.path);
+        }
 
         Ok(self
             .tasks
@@ -226,14 +285,16 @@ impl StreamManager {
             let tasks = manager.tasks.lock().unwrap();
             tasks
                 .get(id)
-                .map(|t| t.copy_mode && !t.using_transcode)
+                .map(|t| {
+                    t.source_type == SourceType::File && t.copy_mode && !t.using_transcode
+                })
                 .unwrap_or(false)
         };
 
         if exit_code.is_none() || exit_code == Some(0) {
             let mut tasks = manager.tasks.lock().unwrap();
             if let Some(task) = tasks.get_mut(id) {
-                if task.loop_enabled {
+                if task.source_type == SourceType::File && task.loop_enabled {
                     task.status = StreamStatus::Running;
                 } else {
                     task.status = StreamStatus::Stopped;
@@ -244,29 +305,22 @@ impl StreamManager {
         }
 
         if should_retry_transcode {
-            let (path, loop_enabled) = {
+            let task_snapshot = {
                 let mut tasks = manager.tasks.lock().unwrap();
                 let task = tasks.get_mut(id).unwrap();
                 task.using_transcode = true;
                 task.status = StreamStatus::Running;
                 task.error = Some("Copy 模式失败，正在尝试转码推流…".to_string());
-                (task.path.clone(), task.loop_enabled)
+                task.clone_snapshot()
             };
 
             let app_clone = app.clone();
             let id_owned = id.to_string();
 
             if manager
-                .spawn_ffmpeg(
-                    app.clone(),
-                    &id_owned,
-                    &path,
-                    loop_enabled,
-                    true,
-                    move |stream_id, stderr, exit_code| {
-                        Self::handle_process_exit(&app_clone, &stream_id, &stderr, exit_code);
-                    },
-                )
+                .spawn_ffmpeg(app.clone(), &id_owned, &task_snapshot, move |stream_id, stderr, exit_code| {
+                    Self::handle_process_exit(&app_clone, &stream_id, &stderr, exit_code);
+                })
                 .is_ok()
             {
                 let _ = app.emit("streams-changed", ());
@@ -289,15 +343,14 @@ impl StreamManager {
         &self,
         app: AppHandle,
         id: &str,
-        path: &Path,
-        loop_enabled: bool,
-        transcode: bool,
+        task: &InternalStreamTask,
         on_exit: F,
     ) -> Result<(), String>
     where
         F: FnOnce(String, String, Option<i32>) + Send + 'static,
     {
-        let args = build_stream_args(path, id, loop_enabled, transcode);
+        let transcode = task.using_transcode || task.source_type != SourceType::File;
+        let args = build_stream_args(task, id, transcode);
         let sidecar = app.shell().sidecar("ffmpeg").map_err(|e| e.to_string())?;
         let (mut rx, child) = sidecar.args(args).spawn().map_err(|e| e.to_string())?;
 
@@ -425,7 +478,7 @@ impl StreamManager {
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, t)| t.status != StreamStatus::Running && t.source_type == SourceType::File)
+            .filter(|(_, t)| t.status != StreamStatus::Running)
             .map(|(id, _)| id.clone())
             .collect();
 
@@ -464,6 +517,25 @@ impl StreamManager {
             mediamtx_running: mediamtx.is_running(),
             dependencies: crate::mediamtx::dependency_status(app),
             settings: self.get_settings(),
+        }
+    }
+}
+
+impl InternalStreamTask {
+    fn clone_snapshot(&self) -> InternalStreamTask {
+        InternalStreamTask {
+            id: self.id.clone(),
+            path: self.path.clone(),
+            filename: self.filename.clone(),
+            source_type: self.source_type.clone(),
+            status: self.status.clone(),
+            loop_enabled: self.loop_enabled,
+            copy_mode: self.copy_mode,
+            audio_device: self.audio_device.clone(),
+            error: self.error.clone(),
+            elapsed_secs: self.elapsed_secs,
+            duration_secs: self.duration_secs,
+            using_transcode: self.using_transcode,
         }
     }
 }

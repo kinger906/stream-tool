@@ -15,7 +15,7 @@ defineEmits<{
   <header class="header">
     <div class="brand">
       <h1>视频推流工具</h1>
-      <p class="subtitle">本地视频 → RTSP / HLS 实时推流，VLC 局域网播放</p>
+      <p class="subtitle">文件 / 摄像头 / 桌面 → RTSP / HLS 实时推流，VLC 局域网播放</p>
     </div>
     <div class="meta" v-if="systemInfo">
       <div class="chip" :class="{ ok: systemInfo.mediamtxRunning }">

@@ -1,5 +1,6 @@
+use crate::capture;
 use crate::mediamtx::MediaMtxState;
-use crate::models::{AppSettings, StreamTaskInfo, SystemInfo};
+use crate::models::{AppSettings, CaptureDevices, StreamTaskInfo, SystemInfo};
 use crate::stream_manager::StreamManager;
 use tauri::State;
 
@@ -23,6 +24,28 @@ pub fn add_streams(
     manager: State<'_, StreamManager>,
 ) -> Result<Vec<StreamTaskInfo>, String> {
     manager.add_files(paths)
+}
+
+#[tauri::command]
+pub async fn list_capture_devices(app: tauri::AppHandle) -> Result<CaptureDevices, String> {
+    capture::list_devices(&app).await
+}
+
+#[tauri::command]
+pub fn add_camera_stream(
+    video_device: String,
+    audio_device: Option<String>,
+    manager: State<'_, StreamManager>,
+) -> Result<StreamTaskInfo, String> {
+    manager.add_camera_stream(video_device, audio_device)
+}
+
+#[tauri::command]
+pub fn add_display_stream(
+    audio_device: Option<String>,
+    manager: State<'_, StreamManager>,
+) -> Result<StreamTaskInfo, String> {
+    manager.add_display_stream(audio_device)
 }
 
 #[tauri::command]
