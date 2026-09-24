@@ -1,0 +1,76 @@
+:root {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #e8eaed;
+  background: #141414;
+  --surface: #1f1f1f;
+  --surface-2: #262626;
+  --border: #303030;
+  --text-muted: #8c8c8c;
+  --accent: #1677ff;
+  --danger: #ff4d4f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.btn {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: inherit;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn:hover {
+  border-color: var(--accent);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn.danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn.sm {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+input[type="number"] {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: inherit;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.alert {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #2a1215;
+  border: 1px solid #58181c;
+  color: #ff7875;
+  font-size: 13px;
+}
+
+.app-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 24px 32px;
+}
