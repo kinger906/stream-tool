@@ -3,6 +3,7 @@ mod commands;
 mod ffmpeg;
 mod mediamtx;
 mod models;
+mod network;
 mod stream_manager;
 
 use mediamtx::MediaMtxState;
@@ -20,11 +21,14 @@ pub fn run() {
         .manage(MediaMtxState::new())
         .invoke_handler(tauri::generate_handler![
             commands::get_system_info,
+            commands::list_lan_ips,
             commands::list_streams,
             commands::add_streams,
             commands::list_capture_devices,
+            commands::list_windows,
             commands::add_camera_stream,
             commands::add_display_stream,
+            commands::add_window_stream,
             commands::start_stream,
             commands::stop_stream,
             commands::start_all_streams,
@@ -36,6 +40,10 @@ pub fn run() {
         ])
         .setup(|app| {
             let mediamtx = app.state::<MediaMtxState>();
+            let manager = app.state::<StreamManager>();
+            if let Err(err) = manager.init_mediamtx_config(app.handle(), &mediamtx) {
+                eprintln!("MediaMTX 配置初始化失败: {err}");
+            }
             if let Err(err) = mediamtx::start(app.handle(), &mediamtx) {
                 eprintln!("MediaMTX 启动失败: {err}");
             }

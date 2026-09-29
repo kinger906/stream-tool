@@ -1,4 +1,4 @@
-use crate::models::{InternalStreamTask, RTSP_PORT, SourceType};
+use crate::models::{InternalStreamTask, QualityPreset, RTSP_PORT, SourceType};
 use regex::Regex;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -7,6 +7,9 @@ static DURATION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"Duration:\s(\d{2}):(\d{2}):(\d{2}\.\d{2})").unwrap());
 static TIME_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})").unwrap());
+static STATS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"fps=\s*([\d.]+).*bitrate=\s*([\d.]+)kbits/s").unwrap()
+});
 
 pub fn parse_hms_to_secs(h: &str, m: &str, s: &str) -> f64 {
     h.parse::<f64>().unwrap_or(0.0) * 3600.0
@@ -25,6 +28,19 @@ pub fn parse_elapsed_from_stderr(stderr: &str) -> Option<f64> {
         .captures_iter(stderr)
         .last()
         .map(|caps| parse_hms_to_secs(&caps[1], &caps[2], &caps[3]))
+}
+
+pub fn parse_stats_from_stderr(stderr: &str) -> (Option<f64>, Option<f64>) {
+    STATS_RE
+        .captures_iter(stderr)
+        .last()
+        .map(|caps| {
+            (
+                caps[1].parse().ok(),
+                caps[2].parse().ok(),
+            )
+        })
+        .unwrap_or((None, None))
 }
 
 pub fn summarize_error(stderr: &str) -> String {
@@ -60,18 +76,18 @@ pub fn summarize_error(stderr: &str) -> String {
         .unwrap_or_else(|| "FFmpeg 推流失败".to_string())
 }
 
-fn rtsp_output(stream_id: &str) -> Vec<String> {
+fn rtsp_output(stream_name: &str) -> Vec<String> {
     vec![
         "-f".to_string(),
         "rtsp".to_string(),
         "-rtsp_transport".to_string(),
         "tcp".to_string(),
-        format!("rtsp://127.0.0.1:{RTSP_PORT}/{stream_id}"),
+        format!("rtsp://127.0.0.1:{RTSP_PORT}/{stream_name}"),
     ]
 }
 
-fn transcode_video_args() -> Vec<String> {
-    vec![
+fn transcode_video_args(preset: &QualityPreset) -> Vec<String> {
+    let mut args = vec![
         "-c:v".to_string(),
         "libx264".to_string(),
         "-preset".to_string(),
@@ -80,7 +96,14 @@ fn transcode_video_args() -> Vec<String> {
         "zerolatency".to_string(),
         "-pix_fmt".to_string(),
         "yuv420p".to_string(),
-    ]
+        "-b:v".to_string(),
+        preset.video_bitrate().to_string(),
+    ];
+    if let Some(size) = preset.video_size() {
+        args.push("-s".to_string());
+        args.push(size.to_string());
+    }
+    args
 }
 
 fn transcode_audio_args() -> Vec<String> {
@@ -94,19 +117,23 @@ fn transcode_audio_args() -> Vec<String> {
     ]
 }
 
-pub fn build_stream_args(task: &InternalStreamTask, stream_id: &str, transcode: bool) -> Vec<String> {
+pub fn build_stream_args(task: &InternalStreamTask, transcode: bool) -> Vec<String> {
     match task.source_type {
-        SourceType::File => build_file_stream_args(task, stream_id, transcode),
-        SourceType::Camera => build_camera_stream_args(task, stream_id),
-        SourceType::Display => build_display_stream_args(task, stream_id),
+        SourceType::File => build_file_stream_args(task, transcode),
+        SourceType::Camera => build_camera_stream_args(task),
+        SourceType::Display => build_display_stream_args(task, "desktop"),
+        SourceType::Window => build_display_stream_args(
+            task,
+            &format!("title={}", task.window_title.clone().unwrap_or_default()),
+        ),
     }
 }
 
-fn build_file_stream_args(task: &InternalStreamTask, stream_id: &str, transcode: bool) -> Vec<String> {
+fn build_file_stream_args(task: &InternalStreamTask, transcode: bool) -> Vec<String> {
     let mut args = vec![
         "-hide_banner".to_string(),
         "-loglevel".to_string(),
-        "warning".to_string(),
+        "info".to_string(),
     ];
 
     if task.loop_enabled {
@@ -119,30 +146,34 @@ fn build_file_stream_args(task: &InternalStreamTask, stream_id: &str, transcode:
     args.push(task.path.display().to_string());
 
     if transcode {
-        args.extend(transcode_video_args());
+        args.extend(transcode_video_args(&task.quality_preset));
         args.extend(transcode_audio_args());
     } else {
         args.push("-c".to_string());
         args.push("copy".to_string());
     }
 
-    args.extend(rtsp_output(stream_id));
+    args.extend(rtsp_output(&task.stream_name));
     args
 }
 
-fn build_camera_stream_args(task: &InternalStreamTask, stream_id: &str) -> Vec<String> {
+fn build_camera_stream_args(task: &InternalStreamTask) -> Vec<String> {
     let video = task.path.to_string_lossy();
+    let preset = &task.quality_preset;
     let mut args = vec![
         "-hide_banner".to_string(),
         "-loglevel".to_string(),
-        "warning".to_string(),
+        "info".to_string(),
         "-f".to_string(),
         "dshow".to_string(),
-        "-video_size".to_string(),
-        "1280x720".to_string(),
-        "-framerate".to_string(),
-        "30".to_string(),
     ];
+
+    if let Some(size) = preset.video_size() {
+        args.push("-video_size".to_string());
+        args.push(size.to_string());
+    }
+    args.push("-framerate".to_string());
+    args.push(preset.framerate().to_string());
 
     let input = match &task.audio_device {
         Some(audio) => format!("video={video}:audio={audio}"),
@@ -151,30 +182,31 @@ fn build_camera_stream_args(task: &InternalStreamTask, stream_id: &str) -> Vec<S
     args.push("-i".to_string());
     args.push(input);
 
-    args.extend(transcode_video_args());
+    args.extend(transcode_video_args(preset));
     if task.audio_device.is_some() {
         args.extend(transcode_audio_args());
     } else {
         args.push("-an".to_string());
     }
 
-    args.extend(rtsp_output(stream_id));
+    args.extend(rtsp_output(&task.stream_name));
     args
 }
 
-fn build_display_stream_args(task: &InternalStreamTask, stream_id: &str) -> Vec<String> {
+fn build_display_stream_args(task: &InternalStreamTask, target: &str) -> Vec<String> {
+    let preset = &task.quality_preset;
     let mut args = vec![
         "-hide_banner".to_string(),
         "-loglevel".to_string(),
-        "warning".to_string(),
+        "info".to_string(),
         "-f".to_string(),
         "gdigrab".to_string(),
         "-framerate".to_string(),
-        "25".to_string(),
+        preset.framerate().to_string(),
         "-draw_mouse".to_string(),
         "1".to_string(),
         "-i".to_string(),
-        "desktop".to_string(),
+        target.to_string(),
     ];
 
     if let Some(audio) = &task.audio_device {
@@ -186,7 +218,7 @@ fn build_display_stream_args(task: &InternalStreamTask, stream_id: &str) -> Vec<
         ]);
     }
 
-    args.extend(transcode_video_args());
+    args.extend(transcode_video_args(preset));
     if task.audio_device.is_some() {
         args.extend(transcode_audio_args());
         args.extend([
@@ -199,7 +231,7 @@ fn build_display_stream_args(task: &InternalStreamTask, stream_id: &str) -> Vec<
         args.push("-an".to_string());
     }
 
-    args.extend(rtsp_output(stream_id));
+    args.extend(rtsp_output(&task.stream_name));
     args
 }
 

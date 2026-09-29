@@ -54,6 +54,44 @@ fn parse_dshow_devices(output: &str) -> CaptureDevices {
     CaptureDevices { video, audio }
 }
 
+pub fn list_windows() -> Result<Vec<CaptureDevice>, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let output = Command::new("powershell")
+            .creation_flags(CREATE_NO_WINDOW)
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | ForEach-Object { $_.MainWindowTitle } | Sort-Object -Unique",
+            ])
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        if !output.status.success() && output.stdout.is_empty() {
+            return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        }
+
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut windows = Vec::new();
+        for line in text.lines() {
+            let title = line.trim();
+            if !title.is_empty() {
+                push_unique(&mut windows, title.to_string());
+            }
+        }
+        Ok(windows)
+    }
+
+    #[cfg(not(windows))]
+    {
+        Err("窗口采集仅支持 Windows".to_string())
+    }
+}
+
 fn push_unique(list: &mut Vec<CaptureDevice>, name: String) {
     if !list.iter().any(|d| d.name == name) {
         list.push(CaptureDevice { name });

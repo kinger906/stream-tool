@@ -1,20 +1,30 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Hls from "hls.js";
+import type { PreviewMode } from "../types";
 
-const props = defineProps<{ url: string; title: string }>();
+const props = defineProps<{
+  hlsUrl: string;
+  webrtcUrl: string;
+  title: string;
+}>();
 const emit = defineEmits<{ close: [] }>();
 
+const mode = ref<PreviewMode>("hls");
 const videoRef = ref<HTMLVideoElement | null>(null);
 const playerError = ref<string | null>(null);
 let hls: Hls | null = null;
+
+const activeUrl = computed(() =>
+  mode.value === "hls" ? props.hlsUrl : props.webrtcUrl,
+);
 
 function destroy() {
   hls?.destroy();
   hls = null;
 }
 
-async function setupPlayer(url: string) {
+async function setupHls(url: string) {
   destroy();
   playerError.value = null;
   await nextTick();
@@ -61,16 +71,20 @@ async function setupPlayer(url: string) {
   playerError.value = "当前环境不支持 HLS 播放";
 }
 
-onMounted(() => {
-  setupPlayer(props.url);
+watch(mode, (m) => {
+  if (m === "hls") {
+    setupHls(props.hlsUrl);
+  } else {
+    destroy();
+    playerError.value = null;
+  }
 });
 
-watch(
-  () => props.url,
-  (url) => {
-    setupPlayer(url);
-  },
-);
+onMounted(() => {
+  if (mode.value === "hls") {
+    setupHls(props.hlsUrl);
+  }
+});
 
 onBeforeUnmount(destroy);
 </script>
@@ -80,11 +94,42 @@ onBeforeUnmount(destroy);
     <div class="panel">
       <div class="panel-head">
         <h3>{{ title }}</h3>
-        <button class="btn" @click="emit('close')">关闭</button>
+        <div class="mode-tabs">
+          <button
+            class="btn sm"
+            :class="{ active: mode === 'hls' }"
+            type="button"
+            @click="mode = 'hls'"
+          >
+            HLS
+          </button>
+          <button
+            class="btn sm"
+            :class="{ active: mode === 'webrtc' }"
+            type="button"
+            @click="mode = 'webrtc'"
+          >
+            WebRTC
+          </button>
+        </div>
+        <button class="btn" type="button" @click="emit('close')">关闭</button>
       </div>
-      <video ref="videoRef" controls autoplay muted playsinline class="video" />
-      <p v-if="playerError" class="error">{{ playerError }}</p>
-      <p class="url">{{ url }}</p>
+
+      <template v-if="mode === 'hls'">
+        <video ref="videoRef" controls autoplay muted playsinline class="video" />
+        <p v-if="playerError" class="error">{{ playerError }}</p>
+      </template>
+      <template v-else>
+        <iframe
+          :src="webrtcUrl"
+          class="webrtc-frame"
+          allow="autoplay; camera; microphone; fullscreen"
+          title="WebRTC preview"
+        />
+        <p class="hint">WebRTC 低延迟预览（MediaMTX 内置播放器）</p>
+      </template>
+
+      <p class="url">{{ activeUrl }}</p>
     </div>
   </div>
 </template>
@@ -110,23 +155,41 @@ onBeforeUnmount(destroy);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
 .panel-head h3 {
   margin: 0;
   font-size: 15px;
+  flex: 1;
 }
-.video {
+.mode-tabs {
+  display: flex;
+  gap: 6px;
+}
+.mode-tabs .active {
+  border-color: var(--accent);
+  color: #69b1ff;
+}
+.video,
+.webrtc-frame {
   width: 100%;
   aspect-ratio: 16 / 9;
   background: #000;
+  border: none;
 }
-.error {
+.error,
+.hint {
   margin: 0;
   padding: 8px 16px 0;
   font-size: 12px;
+}
+.error {
   color: #ff7875;
+}
+.hint {
+  color: var(--text-muted);
 }
 .url {
   margin: 0;

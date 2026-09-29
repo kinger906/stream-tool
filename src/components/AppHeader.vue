@@ -15,14 +15,14 @@ defineEmits<{
   <header class="header">
     <div class="brand">
       <h1>视频推流工具</h1>
-      <p class="subtitle">文件 / 摄像头 / 桌面 → RTSP / HLS 实时推流，VLC 局域网播放</p>
+      <p class="subtitle">文件 / 摄像头 / 桌面 / 窗口 → RTSP / HLS / WebRTC，支持录制与认证</p>
     </div>
     <div class="meta" v-if="systemInfo">
       <div class="chip" :class="{ ok: systemInfo.mediamtxRunning }">
         MediaMTX {{ systemInfo.mediamtxRunning ? "运行中" : "未运行" }}
       </div>
       <div class="chip">局域网 IP：{{ systemInfo.lanIp }}</div>
-      <div class="chip">端口 RTSP 8554 / HLS 8888</div>
+      <div class="chip">RTSP 8554 / HLS 8888 / WebRTC 8889</div>
       <div class="chip">并发上限 {{ systemInfo.settings.maxConcurrent }}</div>
     </div>
     <div class="actions">

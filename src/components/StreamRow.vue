@@ -1,20 +1,26 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import type { StreamTaskInfo } from "../types";
+import type { QualityPreset, StreamTaskInfo } from "../types";
 
 const props = defineProps<{ stream: StreamTaskInfo }>();
 
-defineEmits<{
+const emit = defineEmits<{
   start: [];
   stop: [];
   remove: [];
   preview: [];
+  qr: [];
   toggleLoop: [enabled: boolean];
   toggleCopy: [copyMode: boolean];
+  toggleRecord: [enabled: boolean];
+  updateStreamName: [name: string];
+  updateQuality: [preset: QualityPreset];
 }>();
 
 const copiedKey = ref<string | null>(null);
+const editingName = ref(false);
+const nameDraft = ref("");
 let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
 const statusLabel: Record<string, string> = {
@@ -28,19 +34,38 @@ const sourceLabel: Record<string, string> = {
   file: "文件",
   camera: "摄像头",
   display: "桌面",
+  window: "窗口",
+};
+
+const qualityLabel: Record<QualityPreset, string> = {
+  low: "低 (360p)",
+  medium: "中 (720p)",
+  high: "高 (1080p)",
 };
 
 const isFile = computed(() => props.stream.sourceType === "file");
+const isLive = computed(() => props.stream.sourceType !== "file");
 
 const progressText = computed(() => {
-  const { elapsedSecs, durationSecs, loopEnabled, sourceType } = props.stream;
+  const { elapsedSecs, durationSecs, loopEnabled, sourceType, fps, bitrateKbps } =
+    props.stream;
   const elapsed = formatTime(elapsedSecs);
-  if (sourceType !== "file") {
-    return `${elapsed}（直播）`;
+  let base =
+    sourceType !== "file"
+      ? `${elapsed}（直播）`
+      : durationSecs == null
+        ? elapsed
+        : loopEnabled
+          ? `${elapsed} / ${formatTime(durationSecs)}（循环）`
+          : `${elapsed} / ${formatTime(durationSecs)}`;
+
+  if (fps != null || bitrateKbps != null) {
+    const parts = [];
+    if (fps != null) parts.push(`${fps.toFixed(1)} fps`);
+    if (bitrateKbps != null) parts.push(`${bitrateKbps.toFixed(0)} kbps`);
+    base += ` · ${parts.join(" · ")}`;
   }
-  if (durationSecs == null) return elapsed;
-  const total = formatTime(durationSecs);
-  return loopEnabled ? `${elapsed} / ${total}（循环）` : `${elapsed} / ${total}`;
+  return base;
 });
 
 function formatTime(secs: number) {
@@ -65,6 +90,19 @@ async function copy(label: string, text: string) {
     window.prompt("复制失败，请手动复制：", text);
   }
 }
+
+function startEditName() {
+  if (props.stream.status === "running") return;
+  nameDraft.value = props.stream.streamName;
+  editingName.value = true;
+}
+
+function commitName() {
+  editingName.value = false;
+  if (nameDraft.value && nameDraft.value !== props.stream.streamName) {
+    emit("updateStreamName", nameDraft.value);
+  }
+}
 </script>
 
 <template>
@@ -73,6 +111,27 @@ async function copy(label: string, text: string) {
       <div class="filename">
         <span class="source-tag">{{ sourceLabel[stream.sourceType] }}</span>
         {{ stream.filename }}
+      </div>
+      <div class="stream-name">
+        <template v-if="editingName">
+          <input
+            v-model="nameDraft"
+            class="name-input"
+            @keyup.enter="commitName"
+            @blur="commitName"
+          />
+        </template>
+        <template v-else>
+          <code>/{{ stream.streamName }}</code>
+          <button
+            v-if="stream.status !== 'running'"
+            class="btn link"
+            type="button"
+            @click="startEditName"
+          >
+            编辑
+          </button>
+        </template>
       </div>
       <div class="id">{{ stream.id }}</div>
     </td>
@@ -85,22 +144,14 @@ async function copy(label: string, text: string) {
       <div class="url-row">
         <span class="label">RTSP</span>
         <code>{{ stream.rtspUrl }}</code>
-        <button
-          class="btn sm"
-          type="button"
-          @click.stop="copy('rtsp', stream.rtspUrl)"
-        >
+        <button class="btn sm" type="button" @click.stop="copy('rtsp', stream.rtspUrl)">
           {{ copiedKey === "rtsp" ? "已复制" : "复制" }}
         </button>
       </div>
       <div class="url-row">
         <span class="label">HLS</span>
         <code>{{ stream.hlsUrl }}</code>
-        <button
-          class="btn sm"
-          type="button"
-          @click.stop="copy('hls', stream.hlsUrl)"
-        >
+        <button class="btn sm" type="button" @click.stop="copy('hls', stream.hlsUrl)">
           {{ copiedKey === "hls" ? "已复制" : "复制" }}
         </button>
       </div>
@@ -126,7 +177,29 @@ async function copy(label: string, text: string) {
           Copy
         </label>
       </template>
-      <span v-else class="live-hint">实时转码</span>
+      <label v-if="isLive" class="field-inline">
+        <span>画质</span>
+        <select
+          :value="stream.qualityPreset"
+          :disabled="stream.status === 'running'"
+          @change="
+            $emit('updateQuality', ($event.target as HTMLSelectElement).value as QualityPreset)
+          "
+        >
+          <option v-for="(label, key) in qualityLabel" :key="key" :value="key">
+            {{ label }}
+          </option>
+        </select>
+      </label>
+      <label class="check">
+        <input
+          type="checkbox"
+          :checked="stream.recordEnabled"
+          :disabled="stream.status === 'running'"
+          @change="$emit('toggleRecord', ($event.target as HTMLInputElement).checked)"
+        />
+        录制
+      </label>
     </td>
     <td class="actions">
       <button
@@ -139,6 +212,7 @@ async function copy(label: string, text: string) {
       </button>
       <button v-else class="btn sm" type="button" @click="$emit('stop')">停止</button>
       <button class="btn sm" type="button" @click="$emit('preview')">预览</button>
+      <button class="btn sm" type="button" @click="$emit('qr')">二维码</button>
       <button class="btn sm danger" type="button" @click="$emit('remove')">删除</button>
     </td>
   </tr>
@@ -157,6 +231,33 @@ tr.error {
   align-items: center;
   gap: 6px;
 }
+.stream-name {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.stream-name code {
+  color: #69b1ff;
+}
+.name-input {
+  width: 120px;
+  font-size: 12px;
+  padding: 2px 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: inherit;
+}
+.btn.link {
+  padding: 0 4px;
+  font-size: 11px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
 .source-tag {
   font-size: 10px;
   padding: 1px 6px;
@@ -164,10 +265,6 @@ tr.error {
   background: #111d2c;
   color: #69b1ff;
   flex-shrink: 0;
-}
-.live-hint {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 .name .id {
   font-size: 11px;
@@ -202,6 +299,7 @@ tr.error {
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
+  max-width: 200px;
 }
 .urls {
   min-width: 280px;
@@ -234,6 +332,21 @@ tr.error {
   gap: 4px;
   margin-bottom: 4px;
   cursor: pointer;
+}
+.field-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+.field-inline select {
+  font-size: 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: inherit;
+  border-radius: 4px;
+  padding: 2px 4px;
 }
 .actions {
   white-space: nowrap;

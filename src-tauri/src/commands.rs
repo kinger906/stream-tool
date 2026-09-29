@@ -1,6 +1,6 @@
 use crate::capture;
 use crate::mediamtx::MediaMtxState;
-use crate::models::{AppSettings, CaptureDevices, StreamTaskInfo, SystemInfo};
+use crate::models::{AppSettings, CaptureDevices, QualityPreset, StreamTaskInfo, SystemInfo};
 use crate::stream_manager::StreamManager;
 use tauri::State;
 
@@ -14,6 +14,11 @@ pub fn get_system_info(
 }
 
 #[tauri::command]
+pub fn list_lan_ips(manager: State<'_, StreamManager>) -> Vec<String> {
+    manager.list_lan_ips()
+}
+
+#[tauri::command]
 pub fn list_streams(manager: State<'_, StreamManager>) -> Vec<StreamTaskInfo> {
     manager.list_streams()
 }
@@ -22,8 +27,10 @@ pub fn list_streams(manager: State<'_, StreamManager>) -> Vec<StreamTaskInfo> {
 pub fn add_streams(
     paths: Vec<String>,
     manager: State<'_, StreamManager>,
+    mediamtx: State<'_, MediaMtxState>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<StreamTaskInfo>, String> {
-    manager.add_files(paths)
+    manager.add_files(&app, &mediamtx, paths)
 }
 
 #[tauri::command]
@@ -32,20 +39,40 @@ pub async fn list_capture_devices(app: tauri::AppHandle) -> Result<CaptureDevice
 }
 
 #[tauri::command]
+pub fn list_windows() -> Result<Vec<crate::models::CaptureDevice>, String> {
+    capture::list_windows()
+}
+
+#[tauri::command]
 pub fn add_camera_stream(
     video_device: String,
     audio_device: Option<String>,
     manager: State<'_, StreamManager>,
+    mediamtx: State<'_, MediaMtxState>,
+    app: tauri::AppHandle,
 ) -> Result<StreamTaskInfo, String> {
-    manager.add_camera_stream(video_device, audio_device)
+    manager.add_camera_stream(&app, &mediamtx, video_device, audio_device)
 }
 
 #[tauri::command]
 pub fn add_display_stream(
     audio_device: Option<String>,
     manager: State<'_, StreamManager>,
+    mediamtx: State<'_, MediaMtxState>,
+    app: tauri::AppHandle,
 ) -> Result<StreamTaskInfo, String> {
-    manager.add_display_stream(audio_device)
+    manager.add_display_stream(&app, &mediamtx, audio_device)
+}
+
+#[tauri::command]
+pub fn add_window_stream(
+    window_title: String,
+    audio_device: Option<String>,
+    manager: State<'_, StreamManager>,
+    mediamtx: State<'_, MediaMtxState>,
+    app: tauri::AppHandle,
+) -> Result<StreamTaskInfo, String> {
+    manager.add_window_stream(&app, &mediamtx, window_title, audio_device)
 }
 
 #[tauri::command]
@@ -78,8 +105,13 @@ pub fn stop_all_streams(manager: State<'_, StreamManager>) -> Vec<StreamTaskInfo
 }
 
 #[tauri::command]
-pub fn remove_stream(id: String, manager: State<'_, StreamManager>) -> Result<(), String> {
-    manager.remove_stream(&id)
+pub fn remove_stream(
+    id: String,
+    manager: State<'_, StreamManager>,
+    mediamtx: State<'_, MediaMtxState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    manager.remove_stream(&app, &mediamtx, &id)
 }
 
 #[tauri::command]
@@ -87,17 +119,45 @@ pub fn update_stream(
     id: String,
     loop_enabled: Option<bool>,
     copy_mode: Option<bool>,
+    stream_name: Option<String>,
+    record_enabled: Option<bool>,
+    quality_preset: Option<QualityPreset>,
     manager: State<'_, StreamManager>,
+    mediamtx: State<'_, MediaMtxState>,
+    app: tauri::AppHandle,
 ) -> Result<StreamTaskInfo, String> {
-    manager.update_stream(&id, loop_enabled, copy_mode)
+    manager.update_stream(
+        &app,
+        &mediamtx,
+        &id,
+        loop_enabled,
+        copy_mode,
+        stream_name,
+        record_enabled,
+        quality_preset,
+    )
 }
 
 #[tauri::command]
 pub fn update_settings(
-    max_concurrent: usize,
+    max_concurrent: Option<usize>,
+    selected_lan_ip: Option<String>,
+    rtsp_username: Option<String>,
+    rtsp_password: Option<String>,
+    record_dir: Option<String>,
     manager: State<'_, StreamManager>,
-) -> AppSettings {
-    manager.set_max_concurrent(max_concurrent)
+    mediamtx: State<'_, MediaMtxState>,
+    app: tauri::AppHandle,
+) -> Result<AppSettings, String> {
+    manager.update_settings(
+        &app,
+        &mediamtx,
+        max_concurrent,
+        selected_lan_ip,
+        rtsp_username,
+        rtsp_password,
+        record_dir,
+    )
 }
 
 #[tauri::command]

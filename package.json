@@ -1,7 +1,7 @@
 {
   "name": "stream-tool",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,10 +16,12 @@
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "hls.js": "^1.6.2",
+    "qrcode": "^1.5.4",
     "vue": "^3.5.13"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^6.0.7",
     "typescript": "~6.0.3",
     "vite": "^8.0.16",

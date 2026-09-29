@@ -1,7 +1,7 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../api/tauri";
-import type { StreamTaskInfo, SystemInfo } from "../types";
+import type { QualityPreset, SettingsUpdate, StreamTaskInfo, SystemInfo } from "../types";
 
 export function useStreams() {
   const streams = ref<StreamTaskInfo[]>([]);
@@ -42,10 +42,7 @@ export function useStreams() {
   async function addCamera(videoDevice: string, audioDevice: string | null) {
     error.value = null;
     try {
-      await api.addCameraStream(
-        videoDevice,
-        audioDevice ?? undefined,
-      );
+      await api.addCameraStream(videoDevice, audioDevice ?? undefined);
       await refresh();
     } catch (e) {
       error.value = String(e);
@@ -56,6 +53,16 @@ export function useStreams() {
     error.value = null;
     try {
       await api.addDisplayStream(audioDevice ?? undefined);
+      await refresh();
+    } catch (e) {
+      error.value = String(e);
+    }
+  }
+
+  async function addWindow(windowTitle: string, audioDevice: string | null) {
+    error.value = null;
+    try {
+      await api.addWindowStream(windowTitle, audioDevice ?? undefined);
       await refresh();
     } catch (e) {
       error.value = String(e);
@@ -100,20 +107,50 @@ export function useStreams() {
   }
 
   async function toggleLoop(id: string, enabled: boolean) {
-    await api.updateStream(id, enabled, undefined);
+    await api.updateStream(id, { loopEnabled: enabled });
     await refresh();
   }
 
   async function toggleCopyMode(id: string, copyMode: boolean) {
-    await api.updateStream(id, undefined, copyMode);
+    await api.updateStream(id, { copyMode });
     await refresh();
   }
 
-  async function updateMaxConcurrent(value: number) {
-    const settings = await api.updateSettings(value);
-    if (systemInfo.value) {
-      systemInfo.value.settings = settings;
+  async function updateStreamName(id: string, streamName: string) {
+    error.value = null;
+    try {
+      await api.updateStream(id, { streamName });
+      await refresh();
+    } catch (e) {
+      error.value = String(e);
     }
+  }
+
+  async function toggleRecord(id: string, enabled: boolean) {
+    await api.updateStream(id, { recordEnabled: enabled });
+    await refresh();
+  }
+
+  async function updateQuality(id: string, qualityPreset: QualityPreset) {
+    await api.updateStream(id, { qualityPreset });
+    await refresh();
+  }
+
+  async function updateSettings(update: SettingsUpdate) {
+    error.value = null;
+    try {
+      const settings = await api.updateSettings(update);
+      if (systemInfo.value) {
+        systemInfo.value.settings = settings;
+      }
+      await refresh();
+    } catch (e) {
+      error.value = String(e);
+    }
+  }
+
+  async function updateMaxConcurrent(value: number) {
+    await updateSettings({ maxConcurrent: value });
   }
 
   onMounted(async () => {
@@ -138,6 +175,7 @@ export function useStreams() {
     addPaths,
     addCamera,
     addDisplay,
+    addWindow,
     start,
     stop,
     startAll,
@@ -145,6 +183,10 @@ export function useStreams() {
     remove,
     toggleLoop,
     toggleCopyMode,
+    updateStreamName,
+    toggleRecord,
+    updateQuality,
+    updateSettings,
     updateMaxConcurrent,
   };
 }

@@ -6,18 +6,18 @@ import CaptureSourceModal from "./components/CaptureSourceModal.vue";
 import DependencyBanner from "./components/DependencyBanner.vue";
 import DropZone from "./components/DropZone.vue";
 import PreviewPlayer from "./components/PreviewPlayer.vue";
+import QrCodeModal from "./components/QrCodeModal.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import StreamList from "./components/StreamList.vue";
 import { useStreams } from "./composables/useStreams";
-import type { StreamTaskInfo } from "./types";
+import { api } from "./api/tauri";
+import type { QualityPreset, StreamTaskInfo } from "./types";
 
 const {
   streams,
   systemInfo,
   error,
   addPaths,
-  addCamera,
-  addDisplay,
   start,
   stop,
   startAll,
@@ -25,11 +25,16 @@ const {
   remove,
   toggleLoop,
   toggleCopyMode,
-  updateMaxConcurrent,
+  updateStreamName,
+  toggleRecord,
+  updateQuality,
+  updateSettings,
+  refresh,
 } = useStreams();
 
 const preview = ref<StreamTaskInfo | null>(null);
-const captureMode = ref<"camera" | "display" | null>(null);
+const qrStream = ref<StreamTaskInfo | null>(null);
+const captureMode = ref<"camera" | "display" | "window" | null>(null);
 let unlistenDrop: (() => void) | null = null;
 
 onMounted(async () => {
@@ -44,16 +49,35 @@ onUnmounted(() => {
   unlistenDrop?.();
 });
 
-function onCaptureConfirm(
-  videoDevice: string | null,
-  audioDevice: string | null,
-) {
-  if (captureMode.value === "camera" && videoDevice) {
-    addCamera(videoDevice, audioDevice);
-  } else if (captureMode.value === "display") {
-    addDisplay(audioDevice);
+async function onCaptureConfirm(payload: {
+  videoDevice: string | null;
+  windowTitle: string | null;
+  audioDevice: string | null;
+  qualityPreset: QualityPreset;
+}) {
+  try {
+    let stream: StreamTaskInfo | undefined;
+    if (captureMode.value === "camera" && payload.videoDevice) {
+      stream = await api.addCameraStream(
+        payload.videoDevice,
+        payload.audioDevice ?? undefined,
+      );
+    } else if (captureMode.value === "display") {
+      stream = await api.addDisplayStream(payload.audioDevice ?? undefined);
+    } else if (captureMode.value === "window" && payload.windowTitle) {
+      stream = await api.addWindowStream(
+        payload.windowTitle,
+        payload.audioDevice ?? undefined,
+      );
+    }
+    if (stream && payload.qualityPreset !== "medium") {
+      await api.updateStream(stream.id, { qualityPreset: payload.qualityPreset });
+    }
+    captureMode.value = null;
+    await refresh();
+  } catch (e) {
+    error.value = String(e);
   }
-  captureMode.value = null;
 }
 </script>
 
@@ -76,6 +100,7 @@ function onCaptureConfirm(
       @add="addPaths"
       @add-camera="captureMode = 'camera'"
       @add-display="captureMode = 'display'"
+      @add-window="captureMode = 'window'"
     />
 
     <StreamList
@@ -84,21 +109,35 @@ function onCaptureConfirm(
       @stop="stop"
       @remove="remove"
       @preview="preview = $event"
+      @qr="qrStream = $event"
       @toggle-loop="toggleLoop"
       @toggle-copy="toggleCopyMode"
+      @toggle-record="toggleRecord"
+      @update-stream-name="updateStreamName"
+      @update-quality="updateQuality"
     />
 
     <SettingsPanel
       v-if="systemInfo"
-      :max-concurrent="systemInfo.settings.maxConcurrent"
-      @update="updateMaxConcurrent"
+      :settings="systemInfo.settings"
+      :lan-ips="systemInfo.lanIps"
+      :effective-record-dir="systemInfo.recordDir"
+      @update="updateSettings"
     />
 
     <PreviewPlayer
       v-if="preview"
-      :url="preview.hlsUrlLocal"
+      :hls-url="preview.hlsUrlLocal"
+      :webrtc-url="preview.webrtcUrlLocal"
       :title="preview.filename"
       @close="preview = null"
+    />
+
+    <QrCodeModal
+      v-if="qrStream"
+      :url="qrStream.rtspUrl"
+      :title="qrStream.streamName"
+      @close="qrStream = null"
     />
 
     <CaptureSourceModal

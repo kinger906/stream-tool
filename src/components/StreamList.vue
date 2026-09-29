@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import StreamRow from "./StreamRow.vue";
-import type { StreamTaskInfo } from "../types";
+import type { QualityPreset, StreamTaskInfo } from "../types";
 
 defineProps<{ streams: StreamTaskInfo[] }>();
 
@@ -9,8 +9,12 @@ defineEmits<{
   stop: [id: string];
   remove: [id: string];
   preview: [stream: StreamTaskInfo];
+  qr: [stream: StreamTaskInfo];
   toggleLoop: [id: string, enabled: boolean];
   toggleCopy: [id: string, copyMode: boolean];
+  toggleRecord: [id: string, enabled: boolean];
+  updateStreamName: [id: string, name: string];
+  updateQuality: [id: string, preset: QualityPreset];
 }>();
 </script>
 
@@ -19,9 +23,9 @@ defineEmits<{
     <table v-if="streams.length" class="table">
       <thead>
         <tr>
-          <th>视频</th>
+          <th>视频 / 流名</th>
           <th>状态</th>
-          <th>进度</th>
+          <th>进度 / 码率</th>
           <th>流地址（局域网）</th>
           <th>选项</th>
           <th>操作</th>
@@ -36,12 +40,16 @@ defineEmits<{
           @stop="$emit('stop', s.id)"
           @remove="$emit('remove', s.id)"
           @preview="$emit('preview', s)"
+          @qr="$emit('qr', s)"
           @toggle-loop="$emit('toggleLoop', s.id, $event)"
           @toggle-copy="$emit('toggleCopy', s.id, $event)"
+          @toggle-record="$emit('toggleRecord', s.id, $event)"
+          @update-stream-name="$emit('updateStreamName', s.id, $event)"
+          @update-quality="$emit('updateQuality', s.id, $event)"
         />
       </tbody>
     </table>
-    <div v-else class="empty">暂无推流任务，请添加视频文件</div>
+    <div v-else class="empty">暂无推流任务，请添加视频或采集源</div>
   </div>
 </template>
 
