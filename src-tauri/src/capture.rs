@@ -57,39 +57,84 @@ fn parse_dshow_devices(output: &str) -> CaptureDevices {
 pub fn list_windows() -> Result<Vec<CaptureDevice>, String> {
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        use std::process::Command;
-
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let output = Command::new("powershell")
-            .creation_flags(CREATE_NO_WINDOW)
-            .args([
-                "-NoProfile",
-                "-Command",
-                "Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | ForEach-Object { $_.MainWindowTitle } | Sort-Object -Unique",
-            ])
-            .output()
-            .map_err(|e| e.to_string())?;
-
-        if !output.status.success() && output.stdout.is_empty() {
-            return Err(String::from_utf8_lossy(&output.stderr).to_string());
-        }
-
-        let text = String::from_utf8_lossy(&output.stdout);
-        let mut windows = Vec::new();
-        for line in text.lines() {
-            let title = line.trim();
-            if !title.is_empty() {
-                push_unique(&mut windows, title.to_string());
-            }
-        }
-        Ok(windows)
+        list_windows_win32()
     }
 
     #[cfg(not(windows))]
     {
         Err("窗口采集仅支持 Windows".to_string())
     }
+}
+
+/// Enumerate visible top-level window titles via Win32 UTF-16 APIs
+/// (avoids PowerShell GBK/UTF-8 mojibake on Chinese Windows).
+#[cfg(windows)]
+fn list_windows_win32() -> Result<Vec<CaptureDevice>, String> {
+    struct EnumState {
+        titles: Vec<String>,
+    }
+
+    unsafe extern "system" fn enum_proc(hwnd: isize, lparam: isize) -> i32 {
+        const GW_OWNER: u32 = 4;
+
+        // SAFETY: lparam points to EnumState living on the calling stack for the
+        // duration of EnumWindows.
+        let state = unsafe { &mut *(lparam as *mut EnumState) };
+
+        unsafe {
+            if IsWindowVisible(hwnd) == 0 {
+                return 1;
+            }
+            // Skip owned popups; keep top-level windows.
+            if GetWindow(hwnd, GW_OWNER) != 0 {
+                return 1;
+            }
+
+            let mut buf = [0u16; 512];
+            let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+            if len <= 0 {
+                return 1;
+            }
+
+            let title = String::from_utf16_lossy(&buf[..len as usize]);
+            let title = title.trim();
+            if title.is_empty() {
+                return 1;
+            }
+
+            if !state.titles.iter().any(|t| t == title) {
+                state.titles.push(title.to_string());
+            }
+        }
+        1
+    }
+
+    let mut state = EnumState {
+        titles: Vec::new(),
+    };
+    let ok = unsafe { EnumWindows(Some(enum_proc), &mut state as *mut EnumState as isize) };
+    if ok == 0 {
+        return Err("枚举窗口失败".to_string());
+    }
+
+    state.titles.sort();
+    Ok(state
+        .titles
+        .into_iter()
+        .map(|name| CaptureDevice { name })
+        .collect())
+}
+
+#[cfg(windows)]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn EnumWindows(
+        lp_enum_func: Option<unsafe extern "system" fn(isize, isize) -> i32>,
+        lparam: isize,
+    ) -> i32;
+    fn IsWindowVisible(hwnd: isize) -> i32;
+    fn GetWindow(hwnd: isize, cmd: u32) -> isize;
+    fn GetWindowTextW(hwnd: isize, lp_string: *mut u16, n_max_count: i32) -> i32;
 }
 
 fn push_unique(list: &mut Vec<CaptureDevice>, name: String) {

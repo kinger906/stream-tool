@@ -211,7 +211,19 @@ function commitName() {
         开始
       </button>
       <button v-else class="btn sm" type="button" @click="$emit('stop')">停止</button>
-      <button class="btn sm" type="button" @click="$emit('preview')">预览</button>
+      <button
+        class="btn sm"
+        type="button"
+        :disabled="stream.status !== 'running'"
+        :title="
+          stream.status !== 'running'
+            ? '请先开始推流'
+            : '使用列表中的 HLS / WebRTC 地址预览'
+        "
+        @click="$emit('preview')"
+      >
+        预览
+      </button>
       <button class="btn sm" type="button" @click="$emit('qr')">二维码</button>
       <button class="btn sm danger" type="button" @click="$emit('remove')">删除</button>
     </td>

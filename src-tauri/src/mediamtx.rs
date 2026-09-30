@@ -171,7 +171,7 @@ pub fn stop(state: &MediaMtxState) {
     }
 }
 
-pub fn sync_config_and_restart(
+pub fn write_config_only(
     app: &AppHandle,
     state: &MediaMtxState,
     tasks: &HashMap<String, InternalStreamTask>,
@@ -179,8 +179,20 @@ pub fn sync_config_and_restart(
 ) -> Result<(), String> {
     let path = write_config(app, tasks, settings)?;
     *state.config_path.lock().unwrap() = Some(path);
+    Ok(())
+}
+
+pub fn sync_config_and_restart(
+    app: &AppHandle,
+    state: &MediaMtxState,
+    tasks: &HashMap<String, InternalStreamTask>,
+    settings: &AppSettings,
+) -> Result<(), String> {
+    write_config_only(app, state, tasks, settings)?;
     if state.is_running() {
         restart(app, state)?;
+        // Give MediaMTX a moment to bind ports before publishers reconnect.
+        std::thread::sleep(std::time::Duration::from_millis(400));
     }
     Ok(())
 }

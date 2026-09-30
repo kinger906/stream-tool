@@ -13,20 +13,47 @@ const emit = defineEmits<{ close: [] }>();
 const mode = ref<PreviewMode>("hls");
 const videoRef = ref<HTMLVideoElement | null>(null);
 const playerError = ref<string | null>(null);
+const waitingHint = ref<string | null>(null);
 let hls: Hls | null = null;
+let manifestRetryTimer: ReturnType<typeof setInterval> | null = null;
+let manifestRetryLeft = 0;
 
 const activeUrl = computed(() =>
   mode.value === "hls" ? props.hlsUrl : props.webrtcUrl,
 );
 
+function clearManifestRetry() {
+  if (manifestRetryTimer) {
+    clearInterval(manifestRetryTimer);
+    manifestRetryTimer = null;
+  }
+  waitingHint.value = null;
+}
+
 function destroy() {
+  clearManifestRetry();
   hls?.destroy();
   hls = null;
+}
+
+function scheduleManifestRetry() {
+  if (manifestRetryTimer || manifestRetryLeft <= 0) return;
+  waitingHint.value = `HLS 清单尚未就绪，正在重试（剩余 ${manifestRetryLeft} 次）…`;
+  manifestRetryTimer = setInterval(() => {
+    if (manifestRetryLeft <= 0) {
+      clearManifestRetry();
+      return;
+    }
+    manifestRetryLeft -= 1;
+    waitingHint.value = `HLS 清单尚未就绪，正在重试（剩余 ${manifestRetryLeft} 次）…`;
+    hls?.startLoad();
+  }, 2000);
 }
 
 async function setupHls(url: string) {
   destroy();
   playerError.value = null;
+  manifestRetryLeft = 8;
   await nextTick();
 
   const video = videoRef.value;
@@ -43,13 +70,23 @@ async function setupHls(url: string) {
 
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (!data.fatal) return;
-      playerError.value = `HLS 加载失败：${data.details ?? data.type}`;
-      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-        hls?.startLoad();
+      const detail = data.details ?? data.type;
+      if (
+        detail === "manifestLoadError" ||
+        detail === "manifestParsingError" ||
+        data.type === Hls.ErrorTypes.NETWORK_ERROR
+      ) {
+        if (manifestRetryLeft > 0) {
+          scheduleManifestRetry();
+          return;
+        }
       }
+      clearManifestRetry();
+      playerError.value = `HLS 加载失败：${detail}。请确认任务为「推流中」，且路径与列表中的 HLS 地址一致。`;
     });
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      clearManifestRetry();
       video.play().catch(() => {
         playerError.value = "自动播放被阻止，请点击播放按钮";
       });
@@ -57,6 +94,7 @@ async function setupHls(url: string) {
 
     hls.loadSource(url);
     hls.attachMedia(video);
+    scheduleManifestRetry();
     return;
   }
 
@@ -79,6 +117,15 @@ watch(mode, (m) => {
     playerError.value = null;
   }
 });
+
+watch(
+  () => props.hlsUrl,
+  (url) => {
+    if (mode.value === "hls") {
+      setupHls(url);
+    }
+  },
+);
 
 onMounted(() => {
   if (mode.value === "hls") {
@@ -117,6 +164,7 @@ onBeforeUnmount(destroy);
 
       <template v-if="mode === 'hls'">
         <video ref="videoRef" controls autoplay muted playsinline class="video" />
+        <p v-if="waitingHint" class="hint">{{ waitingHint }}</p>
         <p v-if="playerError" class="error">{{ playerError }}</p>
       </template>
       <template v-else>
@@ -130,6 +178,9 @@ onBeforeUnmount(destroy);
       </template>
 
       <p class="url">{{ activeUrl }}</p>
+      <p class="hint foot">
+        预览使用与列表相同的局域网地址；本机访问 127.0.0.1 与局域网 IP 等价，失败通常表示尚未推流成功。
+      </p>
     </div>
   </div>
 </template>
@@ -184,6 +235,9 @@ onBeforeUnmount(destroy);
   margin: 0;
   padding: 8px 16px 0;
   font-size: 12px;
+}
+.hint.foot {
+  padding-bottom: 12px;
 }
 .error {
   color: #ff7875;

@@ -55,6 +55,13 @@ impl StreamManager {
         mediamtx::sync_config_and_restart(app, mediamtx, &tasks, &settings)
     }
 
+    /// Update MediaMTX config on disk without restarting (paths are covered by all_others).
+    fn write_mediamtx_config(&self, app: &AppHandle, mediamtx: &MediaMtxState) -> Result<(), String> {
+        let tasks = self.tasks.lock().unwrap().clone();
+        let settings = self.settings.lock().unwrap().clone();
+        mediamtx::write_config_only(app, mediamtx, &tasks, &settings)
+    }
+
     pub fn init_mediamtx_config(
         &self,
         app: &AppHandle,
@@ -111,7 +118,9 @@ impl StreamManager {
         let lan_ip = self.lan_ip();
         let info = task.to_info(&lan_ip, &settings);
         self.tasks.lock().unwrap().insert(task.id.clone(), task);
-        self.sync_mediamtx(app, mediamtx)?;
+        // New stream names are accepted via all_others; avoid restarting MediaMTX
+        // (restart would drop other live publishers).
+        self.write_mediamtx_config(app, mediamtx)?;
         Ok(info)
     }
 
@@ -276,7 +285,7 @@ impl StreamManager {
     ) -> Result<(), String> {
         self.stop_stream_internal(id)?;
         self.tasks.lock().unwrap().remove(id);
-        self.sync_mediamtx(app, mediamtx)?;
+        self.write_mediamtx_config(app, mediamtx)?;
         Ok(())
     }
 
@@ -337,9 +346,14 @@ impl StreamManager {
         let settings = self.settings.lock().unwrap().clone();
         let lan_ip = self.lan_ip();
         let info = task.to_info(&lan_ip, &settings);
+        let needs_restart = record_enabled.is_some();
         drop(tasks);
 
-        self.sync_mediamtx(app, mediamtx)?;
+        if needs_restart {
+            self.sync_mediamtx(app, mediamtx)?;
+        } else {
+            self.write_mediamtx_config(app, mediamtx)?;
+        }
         Ok(info)
     }
 
@@ -388,10 +402,24 @@ impl StreamManager {
             ));
         }
 
-        self.sync_mediamtx(app, mediamtx)?;
+        // Keep MediaMTX up when possible. Restart only if this stream needs
+        // path-level options (recording) that require a config reload.
+        let needs_restart = self
+            .tasks
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|t| t.record_enabled)
+            .unwrap_or(false);
+        if needs_restart {
+            self.sync_mediamtx(app, mediamtx)?;
+        } else {
+            self.write_mediamtx_config(app, mediamtx)?;
+        }
 
         if !mediamtx.is_running() {
             mediamtx::start(app, mediamtx)?;
+            std::thread::sleep(std::time::Duration::from_millis(400));
         }
 
         let running_count = self.processes.lock().unwrap().len();

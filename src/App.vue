@@ -49,6 +49,16 @@ onUnmounted(() => {
   unlistenDrop?.();
 });
 
+function openPreview(stream: StreamTaskInfo) {
+  if (stream.status !== "running") {
+    error.value =
+      "请先点击「开始」并确认状态为「推流中」后再预览。未推流时 HLS/WebRTC 都会 404。";
+    return;
+  }
+  error.value = null;
+  preview.value = stream;
+}
+
 async function onCaptureConfirm(payload: {
   videoDevice: string | null;
   windowTitle: string | null;
@@ -108,7 +118,7 @@ async function onCaptureConfirm(payload: {
       @start="start"
       @stop="stop"
       @remove="remove"
-      @preview="preview = $event"
+      @preview="openPreview"
       @qr="qrStream = $event"
       @toggle-loop="toggleLoop"
       @toggle-copy="toggleCopyMode"
@@ -127,8 +137,8 @@ async function onCaptureConfirm(payload: {
 
     <PreviewPlayer
       v-if="preview"
-      :hls-url="preview.hlsUrlLocal"
-      :webrtc-url="preview.webrtcUrlLocal"
+      :hls-url="preview.hlsUrl"
+      :webrtc-url="preview.webrtcUrl"
       :title="preview.filename"
       @close="preview = null"
     />

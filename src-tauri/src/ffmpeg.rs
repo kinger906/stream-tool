@@ -157,32 +157,40 @@ fn build_file_stream_args(task: &InternalStreamTask, transcode: bool) -> Vec<Str
     args
 }
 
+fn dshow_video_input(video: &str, audio: Option<&str>) -> String {
+    // Pass as a single argv (Rust/CreateProcess keeps spaces intact).
+    // Do NOT wrap device names in quotes: FFmpeg 7 treats literal quotes as part
+    // of the device name and fails with I/O error.
+    match audio {
+        Some(a) => format!("video={video}:audio={a}"),
+        None => format!("video={video}"),
+    }
+}
+
+fn dshow_audio_input(audio: &str) -> String {
+    format!("audio={audio}")
+}
+
 fn build_camera_stream_args(task: &InternalStreamTask) -> Vec<String> {
     let video = task.path.to_string_lossy();
     let preset = &task.quality_preset;
+    // Do not force -video_size/-framerate on dshow input: many cameras reject
+    // unsupported modes and fail before publishing. Scale/bitrate on encode instead.
     let mut args = vec![
         "-hide_banner".to_string(),
         "-loglevel".to_string(),
         "info".to_string(),
         "-f".to_string(),
         "dshow".to_string(),
+        "-rtbufsize".to_string(),
+        "100M".to_string(),
+        "-i".to_string(),
+        dshow_video_input(&video, task.audio_device.as_deref()),
     ];
 
-    if let Some(size) = preset.video_size() {
-        args.push("-video_size".to_string());
-        args.push(size.to_string());
-    }
-    args.push("-framerate".to_string());
-    args.push(preset.framerate().to_string());
-
-    let input = match &task.audio_device {
-        Some(audio) => format!("video={video}:audio={audio}"),
-        None => format!("video={video}"),
-    };
-    args.push("-i".to_string());
-    args.push(input);
-
     args.extend(transcode_video_args(preset));
+    args.push("-r".to_string());
+    args.push(preset.framerate().to_string());
     if task.audio_device.is_some() {
         args.extend(transcode_audio_args());
     } else {
@@ -214,7 +222,7 @@ fn build_display_stream_args(task: &InternalStreamTask, target: &str) -> Vec<Str
             "-f".to_string(),
             "dshow".to_string(),
             "-i".to_string(),
-            format!("audio={audio}"),
+            dshow_audio_input(audio),
         ]);
     }
 
