@@ -132,6 +132,8 @@ pub struct StreamTaskInfo {
     pub error: Option<String>,
     pub elapsed_secs: f64,
     pub duration_secs: Option<f64>,
+    /// Local file size in bytes (file sources only).
+    pub file_size_bytes: Option<u64>,
     pub bitrate_kbps: Option<f64>,
     pub fps: Option<f64>,
     pub reconnect_attempts: u32,
@@ -233,11 +235,19 @@ pub struct InternalStreamTask {
     pub error: Option<String>,
     pub elapsed_secs: f64,
     pub duration_secs: Option<f64>,
+    pub file_size_bytes: Option<u64>,
     pub bitrate_kbps: Option<f64>,
     pub fps: Option<f64>,
     pub using_transcode: bool,
     pub reconnect_attempts: u32,
     pub user_stopped: bool,
+}
+
+pub fn read_file_size_bytes(path: &std::path::Path, source_type: &SourceType) -> Option<u64> {
+    if *source_type != SourceType::File {
+        return None;
+    }
+    std::fs::metadata(path).ok().map(|m| m.len())
 }
 
 pub fn validate_stream_name(name: &str) -> Result<(), String> {
@@ -339,6 +349,7 @@ impl InternalStreamTask {
             error: self.error.clone(),
             elapsed_secs: self.elapsed_secs,
             duration_secs: self.duration_secs,
+            file_size_bytes: self.file_size_bytes,
             bitrate_kbps: self.bitrate_kbps,
             fps: self.fps,
             reconnect_attempts: self.reconnect_attempts,

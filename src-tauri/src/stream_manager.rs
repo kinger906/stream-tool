@@ -139,6 +139,7 @@ impl StreamManager {
         let stream_name = self.ensure_unique_stream_name(&slug_from_filename(filename));
         let using_transcode = source_type != SourceType::File || !copy_mode;
         let auto_reconnect = self.settings.lock().unwrap().auto_reconnect_default;
+        let file_size_bytes = crate::models::read_file_size_bytes(&path, &source_type);
         InternalStreamTask {
             id: self.next_id(),
             stream_name,
@@ -158,6 +159,7 @@ impl StreamManager {
             error: None,
             elapsed_secs: 0.0,
             duration_secs: None,
+            file_size_bytes,
             bitrate_kbps: None,
             fps: None,
             using_transcode,
@@ -231,6 +233,38 @@ impl StreamManager {
         }
 
         Ok(added)
+    }
+
+    /// Add local video files and start streaming immediately — for large-file
+    /// playback on weak terminals (RTSP/HLS instead of opening the whole file).
+    pub fn add_and_start_files(
+        &self,
+        app: &AppHandle,
+        mediamtx: &MediaMtxState,
+        paths: Vec<String>,
+    ) -> Result<Vec<StreamTaskInfo>, String> {
+        let added = self.add_files(app, mediamtx, paths)?;
+        if added.is_empty() {
+            return Err("未找到有效的视频文件".to_string());
+        }
+
+        let mut started = Vec::new();
+        let mut errors = Vec::new();
+        for info in &added {
+            match self.start_stream(app, mediamtx, &info.id) {
+                Ok(s) => started.push(s),
+                Err(err) => {
+                    errors.push(format!("{}: {err}", info.filename));
+                    started.push(info.clone());
+                }
+            }
+        }
+
+        if !errors.is_empty() && started.iter().all(|s| s.status != StreamStatus::Running) {
+            return Err(errors.join("\n"));
+        }
+
+        Ok(started)
     }
 
     pub fn add_camera_stream(
@@ -540,10 +574,13 @@ impl StreamManager {
             r.validate()?;
         }
         let stream_name = self.ensure_unique_stream_name(&spec.stream_name);
+        let path = PathBuf::from(&spec.path);
+        let file_size_bytes = crate::models::read_file_size_bytes(&path, &spec.source_type);
+        let using_transcode = spec.source_type != SourceType::File || !spec.copy_mode;
         Ok(InternalStreamTask {
             id: self.next_id(),
             stream_name,
-            path: PathBuf::from(spec.path),
+            path,
             filename: spec.filename,
             source_type: spec.source_type,
             status: StreamStatus::Idle,
@@ -559,9 +596,10 @@ impl StreamManager {
             error: None,
             elapsed_secs: 0.0,
             duration_secs: None,
+            file_size_bytes,
             bitrate_kbps: None,
             fps: None,
-            using_transcode: true,
+            using_transcode,
             reconnect_attempts: 0,
             user_stopped: false,
         })
@@ -1061,6 +1099,7 @@ impl InternalStreamTask {
             error: self.error.clone(),
             elapsed_secs: self.elapsed_secs,
             duration_secs: self.duration_secs,
+            file_size_bytes: self.file_size_bytes,
             bitrate_kbps: self.bitrate_kbps,
             fps: self.fps,
             using_transcode: self.using_transcode,

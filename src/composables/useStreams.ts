@@ -16,6 +16,7 @@ export function useStreams() {
   const scenes = ref<ScenePreset[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  const notice = ref<string | null>(null);
 
   let unlisten: (() => void) | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -49,6 +50,25 @@ export function useStreams() {
     try {
       await api.addStreams(paths);
       await refresh();
+    } catch (e) {
+      error.value = String(e);
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function addAndStartPaths(paths: string[]) {
+    if (!paths.length) return;
+    loading.value = true;
+    error.value = null;
+    notice.value = null;
+    try {
+      const started = await api.addAndStartStreams(paths);
+      await refresh();
+      const running = started.filter((s) => s.status === "running");
+      if (running.length) {
+        notice.value = `已开始推流 ${running.length} 路大视频，请复制 RTSP/HLS 地址到终端播放（无需加载整文件）`;
+      }
     } catch (e) {
       error.value = String(e);
     } finally {
@@ -235,8 +255,10 @@ export function useStreams() {
     scenes,
     loading,
     error,
+    notice,
     refresh,
     addPaths,
+    addAndStartPaths,
     addCamera,
     addDisplay,
     addWindow,

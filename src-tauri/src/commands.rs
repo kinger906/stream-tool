@@ -37,6 +37,16 @@ pub fn add_streams(
 }
 
 #[tauri::command]
+pub fn add_and_start_streams(
+    paths: Vec<String>,
+    manager: State<'_, StreamManager>,
+    mediamtx: State<'_, MediaMtxState>,
+    app: tauri::AppHandle,
+) -> Result<Vec<StreamTaskInfo>, String> {
+    manager.add_and_start_files(&app, &mediamtx, paths)
+}
+
+#[tauri::command]
 pub async fn list_capture_devices(app: tauri::AppHandle) -> Result<CaptureDevices, String> {
     capture::list_devices(&app).await
 }

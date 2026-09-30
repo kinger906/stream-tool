@@ -144,6 +144,18 @@ pub fn build_stream_args(task: &InternalStreamTask, transcode: bool) -> Vec<Stri
     }
 }
 
+fn append_large_file_open_flags(args: &mut Vec<String>) {
+    // Cap probe so multi-GB files open quickly instead of scanning the whole container.
+    args.extend([
+        "-probesize".to_string(),
+        "5M".to_string(),
+        "-analyzeduration".to_string(),
+        "10M".to_string(),
+        "-fflags".to_string(),
+        "+genpts".to_string(),
+    ]);
+}
+
 fn build_file_stream_args(task: &InternalStreamTask, transcode: bool) -> Vec<String> {
     let mut args = vec![
         "-hide_banner".to_string(),
@@ -157,6 +169,7 @@ fn build_file_stream_args(task: &InternalStreamTask, transcode: bool) -> Vec<Str
     }
 
     args.push("-re".to_string());
+    append_large_file_open_flags(&mut args);
     args.push("-i".to_string());
     args.push(task.path.display().to_string());
 
@@ -172,6 +185,8 @@ fn build_file_stream_args(task: &InternalStreamTask, transcode: bool) -> Vec<Str
         args.extend(transcode_video_args(&task.quality_preset));
         args.extend(transcode_audio_args());
     } else {
+        // Prefer copy for large files: terminals pull a live stream instead of
+        // opening the multi-GB file and buffering the whole container.
         args.push("-c".to_string());
         args.push("copy".to_string());
     }
@@ -280,6 +295,10 @@ fn build_display_stream_args(
 pub fn build_probe_args(file_path: &Path) -> Vec<String> {
     vec![
         "-hide_banner".to_string(),
+        "-probesize".to_string(),
+        "5M".to_string(),
+        "-analyzeduration".to_string(),
+        "10M".to_string(),
         "-i".to_string(),
         file_path.display().to_string(),
     ]

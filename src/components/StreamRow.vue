@@ -57,8 +57,15 @@ const busy = computed(
 );
 
 const progressText = computed(() => {
-  const { elapsedSecs, durationSecs, loopEnabled, sourceType, fps, bitrateKbps } =
-    props.stream;
+  const {
+    elapsedSecs,
+    durationSecs,
+    loopEnabled,
+    sourceType,
+    fps,
+    bitrateKbps,
+    fileSizeBytes,
+  } = props.stream;
   const elapsed = formatTime(elapsedSecs);
   let base =
     sourceType !== "file"
@@ -68,6 +75,10 @@ const progressText = computed(() => {
         : loopEnabled
           ? `${elapsed} / ${formatTime(durationSecs)}（循环）`
           : `${elapsed} / ${formatTime(durationSecs)}`;
+
+  if (sourceType === "file" && fileSizeBytes != null && fileSizeBytes > 0) {
+    base += ` · ${formatSize(fileSizeBytes)}`;
+  }
 
   if (fps != null || bitrateKbps != null) {
     const parts = [];
@@ -85,6 +96,13 @@ function formatTime(secs: number) {
   return h > 0
     ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
     : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function formatSize(bytes: number) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
 }
 
 async function copy(label: string, text: string) {

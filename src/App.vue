@@ -19,7 +19,9 @@ const {
   systemInfo,
   scenes,
   error,
+  notice,
   addPaths,
+  addAndStartPaths,
   start,
   stop,
   startAll,
@@ -118,9 +120,11 @@ async function onCaptureConfirm(payload: {
     />
 
     <div v-if="error" class="alert">{{ error }}</div>
+    <div v-if="notice" class="notice">{{ notice }}</div>
 
     <DropZone
       @add="addPaths"
+      @add-and-start="addAndStartPaths"
       @add-camera="captureMode = 'camera'"
       @add-display="captureMode = 'display'"
       @add-window="captureMode = 'window'"

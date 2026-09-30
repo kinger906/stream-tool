@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 const emit = defineEmits<{
   add: [paths: string[]];
+  addAndStart: [paths: string[]];
   addCamera: [];
   addDisplay: [];
   addWindow: [];
@@ -12,25 +13,44 @@ const emit = defineEmits<{
 
 const dragging = ref(false);
 
-const videoExt = /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts)$/i;
+const videoExt =
+  /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts|m2ts|mpg|mpeg|vob|3gp)$/i;
+
+const videoExtensions = [
+  "mp4",
+  "mkv",
+  "avi",
+  "mov",
+  "wmv",
+  "flv",
+  "webm",
+  "m4v",
+  "ts",
+  "m2ts",
+  "mpg",
+  "mpeg",
+  "vob",
+  "3gp",
+];
 
 function filterVideos(paths: string[]) {
   return paths.filter((p) => videoExt.test(p));
 }
 
-async function pickFiles() {
+async function pickFiles(andStart: boolean) {
   const selected = await open({
     multiple: true,
     filters: [
       {
         name: "视频",
-        extensions: ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "ts"],
+        extensions: videoExtensions,
       },
     ],
   });
   if (!selected) return;
   const paths = Array.isArray(selected) ? selected : [selected];
-  emit("add", paths);
+  if (andStart) emit("addAndStart", paths);
+  else emit("add", paths);
 }
 
 function onDrop(e: DragEvent) {
@@ -62,10 +82,20 @@ function onDragLeave() {
     @dragover="onDragOver"
     @dragleave="onDragLeave"
   >
-    <div class="main" @click="pickFiles">
+    <div class="main" @click="pickFiles(false)">
       <div class="icon">+</div>
-      <p>拖拽视频到此处，或点击选择文件</p>
-      <p class="hint">支持多路并行、RTMP 转推、自动重连与场景预设</p>
+      <p>拖拽或点击选择本地视频（支持超大文件）</p>
+      <p class="hint">
+        推流后终端用 RTSP/HLS 边播边收，无需整文件加载，缓解大视频卡顿
+      </p>
+    </div>
+    <div class="actions">
+      <button class="btn primary" type="button" @click.stop="pickFiles(true)">
+        大视频一键推流
+      </button>
+      <button class="btn" type="button" @click.stop="pickFiles(false)">
+        仅添加文件
+      </button>
     </div>
     <div class="sources">
       <button class="btn source" type="button" @click.stop="emit('addCamera')">
@@ -110,6 +140,18 @@ function onDragLeave() {
   color: var(--text-muted);
   font-size: 13px;
   margin-top: 6px;
+}
+.actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 .sources {
   margin-top: 16px;

@@ -16,6 +16,8 @@ export const api = {
   listLanIps: () => invoke<string[]>("list_lan_ips"),
   listStreams: () => invoke<StreamTaskInfo[]>("list_streams"),
   addStreams: (paths: string[]) => invoke<StreamTaskInfo[]>("add_streams", { paths }),
+  addAndStartStreams: (paths: string[]) =>
+    invoke<StreamTaskInfo[]>("add_and_start_streams", { paths }),
   listCaptureDevices: () => invoke<CaptureDevices>("list_capture_devices"),
   listWindows: () => invoke<CaptureDevice[]>("list_windows"),
   addCameraStream: (videoDevice: string, audioDevice?: string) =>

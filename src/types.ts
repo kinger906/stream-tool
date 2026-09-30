@@ -45,6 +45,7 @@ export interface StreamTaskInfo {
   error: string | null;
   elapsedSecs: number;
   durationSecs: number | null;
+  fileSizeBytes: number | null;
   bitrateKbps: number | null;
   fps: number | null;
   reconnectAttempts: number;

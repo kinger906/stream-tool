@@ -29,6 +29,7 @@ pub fn run() {
             commands::list_lan_ips,
             commands::list_streams,
             commands::add_streams,
+            commands::add_and_start_streams,
             commands::list_capture_devices,
             commands::list_windows,
             commands::add_camera_stream,
