@@ -7,6 +7,7 @@ const emit = defineEmits<{
   addCamera: [];
   addDisplay: [];
   addWindow: [];
+  addRegion: [];
 }>();
 
 const dragging = ref(false);
@@ -64,17 +65,20 @@ function onDragLeave() {
     <div class="main" @click="pickFiles">
       <div class="icon">+</div>
       <p>拖拽视频到此处，或点击选择文件</p>
-      <p class="hint">支持多路并行推流，自定义流名称，可选录制与画质预设</p>
+      <p class="hint">支持多路并行、RTMP 转推、自动重连与场景预设</p>
     </div>
     <div class="sources">
       <button class="btn source" type="button" @click.stop="emit('addCamera')">
-        摄像头推流
+        摄像头
       </button>
       <button class="btn source" type="button" @click.stop="emit('addDisplay')">
-        桌面采集
+        桌面
       </button>
       <button class="btn source" type="button" @click.stop="emit('addWindow')">
-        窗口采集
+        窗口
+      </button>
+      <button class="btn source" type="button" @click.stop="emit('addRegion')">
+        区域截取
       </button>
     </div>
   </div>

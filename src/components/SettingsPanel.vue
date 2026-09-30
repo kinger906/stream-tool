@@ -17,6 +17,9 @@ const emit = defineEmits<{
       rtspUsername?: string;
       rtspPassword?: string;
       recordDir?: string;
+      autoReconnectDefault?: boolean;
+      publicBaseUrl?: string;
+      minimizeToTray?: boolean;
     },
   ];
 }>();
@@ -26,6 +29,9 @@ const selectedLanIp = ref(props.settings.selectedLanIp ?? "");
 const rtspUsername = ref(props.settings.rtspUsername ?? "");
 const rtspPassword = ref(props.settings.rtspPassword ?? "");
 const recordDir = ref(props.settings.recordDir ?? "");
+const autoReconnectDefault = ref(props.settings.autoReconnectDefault);
+const publicBaseUrl = ref(props.settings.publicBaseUrl ?? "");
+const minimizeToTray = ref(props.settings.minimizeToTray);
 
 watch(
   () => props.settings,
@@ -35,6 +41,9 @@ watch(
     rtspUsername.value = s.rtspUsername ?? "";
     rtspPassword.value = s.rtspPassword ?? "";
     recordDir.value = s.recordDir ?? "";
+    autoReconnectDefault.value = s.autoReconnectDefault;
+    publicBaseUrl.value = s.publicBaseUrl ?? "";
+    minimizeToTray.value = s.minimizeToTray;
   },
   { deep: true },
 );
@@ -53,6 +62,9 @@ function apply() {
     rtspUsername: rtspUsername.value,
     rtspPassword: rtspPassword.value,
     recordDir: recordDir.value,
+    autoReconnectDefault: autoReconnectDefault.value,
+    publicBaseUrl: publicBaseUrl.value,
+    minimizeToTray: minimizeToTray.value,
   });
 }
 </script>
@@ -88,10 +100,38 @@ function apply() {
       <label class="field wide">
         <span>录制目录</span>
         <div class="dir-row">
-          <input v-model="recordDir" type="text" :placeholder="recordDir || '默认应用数据目录'" />
+          <input
+            v-model="recordDir"
+            type="text"
+            :placeholder="effectiveRecordDir || '默认应用数据目录'"
+          />
           <button class="btn sm" type="button" @click="pickRecordDir">浏览</button>
         </div>
         <small>当前生效：{{ recordDir || effectiveRecordDir }}</small>
+      </label>
+
+      <label class="field wide">
+        <span>公网隧道 Base URL（可选）</span>
+        <input
+          v-model="publicBaseUrl"
+          type="text"
+          placeholder="例如 https://xxx.trycloudflare.com"
+        />
+        <small>
+          先在本机运行
+          <code>cloudflared tunnel --url http://127.0.0.1:8888</code>
+          ，把生成的 HTTPS 地址填到这里，列表会显示公网 HLS。
+        </small>
+      </label>
+
+      <label class="check">
+        <input v-model="autoReconnectDefault" type="checkbox" />
+        新建任务默认开启自动重连
+      </label>
+
+      <label class="check">
+        <input v-model="minimizeToTray" type="checkbox" />
+        关闭窗口时最小化到系统托盘
       </label>
     </div>
 
@@ -100,8 +140,8 @@ function apply() {
     </div>
 
     <p class="note">
-      局域网播放请在防火墙中放行 TCP/UDP 8554（RTSP）、TCP 8888（HLS）与 TCP 8889（WebRTC）。
-      启用认证后，VLC 需使用带用户名密码的 RTSP 地址。
+      局域网播放请放行 8554（RTSP）、8888（HLS）、8889（WebRTC）。
+      RTMP 转推在任务行设置平台推流地址（如 rtmp://…/live/密钥）。
     </p>
   </section>
 </template>
@@ -150,6 +190,17 @@ function apply() {
 .field small {
   color: var(--text-muted);
   font-size: 11px;
+  line-height: 1.5;
+}
+.field code {
+  font-size: 11px;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
 }
 .actions {
   margin-top: 12px;

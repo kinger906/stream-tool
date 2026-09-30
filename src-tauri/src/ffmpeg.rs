@@ -7,9 +7,8 @@ static DURATION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"Duration:\s(\d{2}):(\d{2}):(\d{2}\.\d{2})").unwrap());
 static TIME_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})").unwrap());
-static STATS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"fps=\s*([\d.]+).*bitrate=\s*([\d.]+)kbits/s").unwrap()
-});
+static STATS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"fps=\s*([\d.]+).*bitrate=\s*([\d.]+)kbits/s").unwrap());
 
 pub fn parse_hms_to_secs(h: &str, m: &str, s: &str) -> f64 {
     h.parse::<f64>().unwrap_or(0.0) * 3600.0
@@ -34,12 +33,7 @@ pub fn parse_stats_from_stderr(stderr: &str) -> (Option<f64>, Option<f64>) {
     STATS_RE
         .captures_iter(stderr)
         .last()
-        .map(|caps| {
-            (
-                caps[1].parse().ok(),
-                caps[2].parse().ok(),
-            )
-        })
+        .map(|caps| (caps[1].parse().ok(), caps[2].parse().ok()))
         .unwrap_or((None, None))
 }
 
@@ -70,20 +64,31 @@ pub fn summarize_error(stderr: &str) -> String {
                 || lower.contains("failed")
                 || lower.contains("no such file")
                 || lower.contains("cannot find")
+                || lower.contains("connection refused")
+                || lower.contains("server error")
         })
         .or_else(|| lines.last())
         .map(|line| line.trim().to_string())
         .unwrap_or_else(|| "FFmpeg 推流失败".to_string())
 }
 
-fn rtsp_output(stream_name: &str) -> Vec<String> {
-    vec![
+fn append_outputs(args: &mut Vec<String>, task: &InternalStreamTask) {
+    args.extend([
         "-f".to_string(),
         "rtsp".to_string(),
         "-rtsp_transport".to_string(),
         "tcp".to_string(),
-        format!("rtsp://127.0.0.1:{RTSP_PORT}/{stream_name}"),
-    ]
+        format!("rtsp://127.0.0.1:{RTSP_PORT}/{}", task.stream_name),
+    ]);
+
+    if let Some(rtmp) = task
+        .rtmp_url
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        args.extend(["-f".to_string(), "flv".to_string(), rtmp.to_string()]);
+    }
 }
 
 fn transcode_video_args(preset: &QualityPreset) -> Vec<String> {
@@ -121,11 +126,21 @@ pub fn build_stream_args(task: &InternalStreamTask, transcode: bool) -> Vec<Stri
     match task.source_type {
         SourceType::File => build_file_stream_args(task, transcode),
         SourceType::Camera => build_camera_stream_args(task),
-        SourceType::Display => build_display_stream_args(task, "desktop"),
+        SourceType::Display => build_display_stream_args(task, "desktop", None),
         SourceType::Window => build_display_stream_args(
             task,
             &format!("title={}", task.window_title.clone().unwrap_or_default()),
+            None,
         ),
+        SourceType::Region => {
+            let region = task.region.clone().unwrap_or(crate::models::CaptureRegion {
+                x: 0,
+                y: 0,
+                width: 1280,
+                height: 720,
+            });
+            build_display_stream_args(task, "desktop", Some(region))
+        }
     }
 }
 
@@ -145,7 +160,15 @@ fn build_file_stream_args(task: &InternalStreamTask, transcode: bool) -> Vec<Str
     args.push("-i".to_string());
     args.push(task.path.display().to_string());
 
-    if transcode {
+    // RTMP (FLV) almost always needs re-encode; keep copy only for RTSP-only.
+    let force_transcode = transcode
+        || task
+            .rtmp_url
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+
+    if force_transcode {
         args.extend(transcode_video_args(&task.quality_preset));
         args.extend(transcode_audio_args());
     } else {
@@ -153,14 +176,11 @@ fn build_file_stream_args(task: &InternalStreamTask, transcode: bool) -> Vec<Str
         args.push("copy".to_string());
     }
 
-    args.extend(rtsp_output(&task.stream_name));
+    append_outputs(&mut args, task);
     args
 }
 
 fn dshow_video_input(video: &str, audio: Option<&str>) -> String {
-    // Pass as a single argv (Rust/CreateProcess keeps spaces intact).
-    // Do NOT wrap device names in quotes: FFmpeg 7 treats literal quotes as part
-    // of the device name and fails with I/O error.
     match audio {
         Some(a) => format!("video={video}:audio={a}"),
         None => format!("video={video}"),
@@ -174,8 +194,6 @@ fn dshow_audio_input(audio: &str) -> String {
 fn build_camera_stream_args(task: &InternalStreamTask) -> Vec<String> {
     let video = task.path.to_string_lossy();
     let preset = &task.quality_preset;
-    // Do not force -video_size/-framerate on dshow input: many cameras reject
-    // unsupported modes and fail before publishing. Scale/bitrate on encode instead.
     let mut args = vec![
         "-hide_banner".to_string(),
         "-loglevel".to_string(),
@@ -197,11 +215,15 @@ fn build_camera_stream_args(task: &InternalStreamTask) -> Vec<String> {
         args.push("-an".to_string());
     }
 
-    args.extend(rtsp_output(&task.stream_name));
+    append_outputs(&mut args, task);
     args
 }
 
-fn build_display_stream_args(task: &InternalStreamTask, target: &str) -> Vec<String> {
+fn build_display_stream_args(
+    task: &InternalStreamTask,
+    target: &str,
+    region: Option<crate::models::CaptureRegion>,
+) -> Vec<String> {
     let preset = &task.quality_preset;
     let mut args = vec![
         "-hide_banner".to_string(),
@@ -213,9 +235,21 @@ fn build_display_stream_args(task: &InternalStreamTask, target: &str) -> Vec<Str
         preset.framerate().to_string(),
         "-draw_mouse".to_string(),
         "1".to_string(),
-        "-i".to_string(),
-        target.to_string(),
     ];
+
+    if let Some(r) = region {
+        args.extend([
+            "-offset_x".to_string(),
+            r.x.to_string(),
+            "-offset_y".to_string(),
+            r.y.to_string(),
+            "-video_size".to_string(),
+            format!("{}x{}", r.width, r.height),
+        ]);
+    }
+
+    args.push("-i".to_string());
+    args.push(target.to_string());
 
     if let Some(audio) = &task.audio_device {
         args.extend([
@@ -239,7 +273,7 @@ fn build_display_stream_args(task: &InternalStreamTask, target: &str) -> Vec<Str
         args.push("-an".to_string());
     }
 
-    args.extend(rtsp_output(&task.stream_name));
+    append_outputs(&mut args, task);
     args
 }
 

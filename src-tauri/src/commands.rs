@@ -1,6 +1,9 @@
 use crate::capture;
 use crate::mediamtx::MediaMtxState;
-use crate::models::{AppSettings, CaptureDevices, QualityPreset, StreamTaskInfo, SystemInfo};
+use crate::models::{
+    AppSettings, CaptureDevices, CaptureRegion, QualityPreset, ScenePreset, StreamTaskInfo,
+    SystemInfo,
+};
 use crate::stream_manager::StreamManager;
 use tauri::State;
 
@@ -76,6 +79,17 @@ pub fn add_window_stream(
 }
 
 #[tauri::command]
+pub fn add_region_stream(
+    region: CaptureRegion,
+    audio_device: Option<String>,
+    manager: State<'_, StreamManager>,
+    mediamtx: State<'_, MediaMtxState>,
+    app: tauri::AppHandle,
+) -> Result<StreamTaskInfo, String> {
+    manager.add_region_stream(&app, &mediamtx, region, audio_device)
+}
+
+#[tauri::command]
 pub fn start_stream(
     id: String,
     manager: State<'_, StreamManager>,
@@ -122,6 +136,9 @@ pub fn update_stream(
     stream_name: Option<String>,
     record_enabled: Option<bool>,
     quality_preset: Option<QualityPreset>,
+    auto_reconnect: Option<bool>,
+    rtmp_url: Option<String>,
+    region: Option<CaptureRegion>,
     manager: State<'_, StreamManager>,
     mediamtx: State<'_, MediaMtxState>,
     app: tauri::AppHandle,
@@ -135,6 +152,9 @@ pub fn update_stream(
         stream_name,
         record_enabled,
         quality_preset,
+        auto_reconnect,
+        rtmp_url,
+        region,
     )
 }
 
@@ -145,6 +165,9 @@ pub fn update_settings(
     rtsp_username: Option<String>,
     rtsp_password: Option<String>,
     record_dir: Option<String>,
+    auto_reconnect_default: Option<bool>,
+    public_base_url: Option<String>,
+    minimize_to_tray: Option<bool>,
     manager: State<'_, StreamManager>,
     mediamtx: State<'_, MediaMtxState>,
     app: tauri::AppHandle,
@@ -157,7 +180,47 @@ pub fn update_settings(
         rtsp_username,
         rtsp_password,
         record_dir,
+        auto_reconnect_default,
+        public_base_url,
+        minimize_to_tray,
     )
+}
+
+#[tauri::command]
+pub fn list_scenes(
+    manager: State<'_, StreamManager>,
+    app: tauri::AppHandle,
+) -> Result<Vec<ScenePreset>, String> {
+    manager.list_scenes(&app)
+}
+
+#[tauri::command]
+pub fn save_scene(
+    name: String,
+    manager: State<'_, StreamManager>,
+    app: tauri::AppHandle,
+) -> Result<ScenePreset, String> {
+    manager.save_current_scene(&app, name)
+}
+
+#[tauri::command]
+pub fn delete_scene(
+    id: String,
+    manager: State<'_, StreamManager>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    manager.delete_scene(&app, &id)
+}
+
+#[tauri::command]
+pub fn apply_scene(
+    id: String,
+    replace: bool,
+    manager: State<'_, StreamManager>,
+    mediamtx: State<'_, MediaMtxState>,
+    app: tauri::AppHandle,
+) -> Result<Vec<StreamTaskInfo>, String> {
+    manager.apply_scene(&app, &mediamtx, &id, replace)
 }
 
 #[tauri::command]

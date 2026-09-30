@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { api } from "../api/tauri";
-import type { CaptureDevice, QualityPreset } from "../types";
+import type { CaptureDevice, CaptureRegion, QualityPreset } from "../types";
 
 const props = defineProps<{
-  mode: "camera" | "display" | "window";
+  mode: "camera" | "display" | "window" | "region";
 }>();
 
 const emit = defineEmits<{
@@ -15,6 +15,7 @@ const emit = defineEmits<{
       windowTitle: string | null;
       audioDevice: string | null;
       qualityPreset: QualityPreset;
+      region: CaptureRegion | null;
     },
   ];
 }>();
@@ -27,13 +28,18 @@ const windowList = ref<CaptureDevice[]>([]);
 const selectedVideo = ref("");
 const selectedWindow = ref("");
 const selectedAudio = ref("");
-const includeAudio = ref(true);
+const includeAudio = ref(false);
 const qualityPreset = ref<QualityPreset>("medium");
+const regionX = ref(0);
+const regionY = ref(0);
+const regionW = ref(1280);
+const regionH = ref(720);
 
 const titleMap = {
   camera: "添加摄像头推流",
   display: "添加桌面采集推流",
   window: "添加窗口采集推流",
+  region: "添加区域截取推流",
 };
 
 onMounted(async () => {
@@ -71,6 +77,16 @@ function submit() {
     error.value = "请选择窗口";
     return;
   }
+  if (props.mode === "region") {
+    if (regionW.value < 16 || regionH.value < 16) {
+      error.value = "区域宽高至少为 16";
+      return;
+    }
+    if (regionW.value % 2 !== 0 || regionH.value % 2 !== 0) {
+      error.value = "区域宽高需为偶数";
+      return;
+    }
+  }
   const audio =
     includeAudio.value && selectedAudio.value ? selectedAudio.value : null;
   emit("confirm", {
@@ -78,6 +94,15 @@ function submit() {
     windowTitle: props.mode === "window" ? selectedWindow.value : null,
     audioDevice: audio,
     qualityPreset: qualityPreset.value,
+    region:
+      props.mode === "region"
+        ? {
+            x: regionX.value,
+            y: regionY.value,
+            width: regionW.value,
+            height: regionH.value,
+          }
+        : null,
   });
 }
 </script>
@@ -117,6 +142,28 @@ function submit() {
         <label v-if="mode === 'display'" class="hint-block">
           将采集整个桌面画面（Windows gdigrab）。
         </label>
+
+        <div v-if="mode === 'region'" class="region-grid">
+          <label class="field">
+            <span>X</span>
+            <input v-model.number="regionX" type="number" min="0" />
+          </label>
+          <label class="field">
+            <span>Y</span>
+            <input v-model.number="regionY" type="number" min="0" />
+          </label>
+          <label class="field">
+            <span>宽</span>
+            <input v-model.number="regionW" type="number" min="16" step="2" />
+          </label>
+          <label class="field">
+            <span>高</span>
+            <input v-model.number="regionH" type="number" min="16" step="2" />
+          </label>
+          <p class="hint-block">
+            主屏左上角为原点，宽高建议偶数（如 1280×720）。
+          </p>
+        </div>
 
         <label class="field">
           <span>画质预设</span>
@@ -201,12 +248,21 @@ function submit() {
   gap: 6px;
   font-size: 13px;
 }
-.field select {
+.field select,
+.field input {
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: inherit;
   border-radius: 6px;
   padding: 8px;
+}
+.region-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.region-grid .hint-block {
+  grid-column: 1 / -1;
 }
 .check {
   display: flex;
@@ -219,6 +275,7 @@ function submit() {
   font-size: 13px;
   color: var(--text-muted);
   line-height: 1.5;
+  margin: 0;
 }
 .error {
   color: #ff7875;

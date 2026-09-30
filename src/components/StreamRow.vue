@@ -14,18 +14,23 @@ const emit = defineEmits<{
   toggleLoop: [enabled: boolean];
   toggleCopy: [copyMode: boolean];
   toggleRecord: [enabled: boolean];
+  toggleReconnect: [enabled: boolean];
   updateStreamName: [name: string];
   updateQuality: [preset: QualityPreset];
+  updateRtmp: [url: string];
 }>();
 
 const copiedKey = ref<string | null>(null);
 const editingName = ref(false);
+const editingRtmp = ref(false);
 const nameDraft = ref("");
+const rtmpDraft = ref("");
 let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
 const statusLabel: Record<string, string> = {
   idle: "待推流",
   running: "推流中",
+  reconnecting: "重连中",
   stopped: "已停止",
   error: "失败",
 };
@@ -35,6 +40,7 @@ const sourceLabel: Record<string, string> = {
   camera: "摄像头",
   display: "桌面",
   window: "窗口",
+  region: "区域",
 };
 
 const qualityLabel: Record<QualityPreset, string> = {
@@ -45,6 +51,10 @@ const qualityLabel: Record<QualityPreset, string> = {
 
 const isFile = computed(() => props.stream.sourceType === "file");
 const isLive = computed(() => props.stream.sourceType !== "file");
+const busy = computed(
+  () =>
+    props.stream.status === "running" || props.stream.status === "reconnecting",
+);
 
 const progressText = computed(() => {
   const { elapsedSecs, durationSecs, loopEnabled, sourceType, fps, bitrateKbps } =
@@ -92,7 +102,7 @@ async function copy(label: string, text: string) {
 }
 
 function startEditName() {
-  if (props.stream.status === "running") return;
+  if (busy.value) return;
   nameDraft.value = props.stream.streamName;
   editingName.value = true;
 }
@@ -102,6 +112,17 @@ function commitName() {
   if (nameDraft.value && nameDraft.value !== props.stream.streamName) {
     emit("updateStreamName", nameDraft.value);
   }
+}
+
+function startEditRtmp() {
+  if (busy.value) return;
+  rtmpDraft.value = props.stream.rtmpUrl ?? "";
+  editingRtmp.value = true;
+}
+
+function commitRtmp() {
+  editingRtmp.value = false;
+  emit("updateRtmp", rtmpDraft.value.trim());
 }
 </script>
 
@@ -124,7 +145,7 @@ function commitName() {
         <template v-else>
           <code>/{{ stream.streamName }}</code>
           <button
-            v-if="stream.status !== 'running'"
+            v-if="!busy"
             class="btn link"
             type="button"
             @click="startEditName"
@@ -155,6 +176,40 @@ function commitName() {
           {{ copiedKey === "hls" ? "已复制" : "复制" }}
         </button>
       </div>
+      <div v-if="stream.publicHlsUrl" class="url-row">
+        <span class="label">公网</span>
+        <code>{{ stream.publicHlsUrl }}</code>
+        <button
+          class="btn sm"
+          type="button"
+          @click.stop="copy('pub', stream.publicHlsUrl!)"
+        >
+          {{ copiedKey === "pub" ? "已复制" : "复制" }}
+        </button>
+      </div>
+      <div class="url-row">
+        <span class="label">RTMP</span>
+        <template v-if="editingRtmp">
+          <input
+            v-model="rtmpDraft"
+            class="rtmp-input"
+            placeholder="rtmp://host/app/key"
+            @keyup.enter="commitRtmp"
+            @blur="commitRtmp"
+          />
+        </template>
+        <template v-else>
+          <code>{{ stream.rtmpUrl || "未设置" }}</code>
+          <button
+            v-if="!busy"
+            class="btn sm"
+            type="button"
+            @click.stop="startEditRtmp"
+          >
+            {{ stream.rtmpUrl ? "改" : "设置" }}
+          </button>
+        </template>
+      </div>
     </td>
     <td class="opts">
       <template v-if="isFile">
@@ -162,7 +217,7 @@ function commitName() {
           <input
             type="checkbox"
             :checked="stream.loopEnabled"
-            :disabled="stream.status === 'running'"
+            :disabled="busy"
             @change="$emit('toggleLoop', ($event.target as HTMLInputElement).checked)"
           />
           循环
@@ -171,7 +226,7 @@ function commitName() {
           <input
             type="checkbox"
             :checked="stream.copyMode"
-            :disabled="stream.status === 'running'"
+            :disabled="busy"
             @change="$emit('toggleCopy', ($event.target as HTMLInputElement).checked)"
           />
           Copy
@@ -181,7 +236,7 @@ function commitName() {
         <span>画质</span>
         <select
           :value="stream.qualityPreset"
-          :disabled="stream.status === 'running'"
+          :disabled="busy"
           @change="
             $emit('updateQuality', ($event.target as HTMLSelectElement).value as QualityPreset)
           "
@@ -195,15 +250,24 @@ function commitName() {
         <input
           type="checkbox"
           :checked="stream.recordEnabled"
-          :disabled="stream.status === 'running'"
+          :disabled="busy"
           @change="$emit('toggleRecord', ($event.target as HTMLInputElement).checked)"
         />
         录制
       </label>
+      <label class="check">
+        <input
+          type="checkbox"
+          :checked="stream.autoReconnect"
+          :disabled="busy"
+          @change="$emit('toggleReconnect', ($event.target as HTMLInputElement).checked)"
+        />
+        自动重连
+      </label>
     </td>
     <td class="actions">
       <button
-        v-if="stream.status !== 'running'"
+        v-if="!busy"
         class="btn sm primary"
         type="button"
         @click="$emit('start')"
@@ -215,11 +279,6 @@ function commitName() {
         class="btn sm"
         type="button"
         :disabled="stream.status !== 'running'"
-        :title="
-          stream.status !== 'running'
-            ? '请先开始推流'
-            : '使用列表中的 HLS / WebRTC 地址预览'
-        "
         @click="$emit('preview')"
       >
         预览
@@ -233,6 +292,9 @@ function commitName() {
 <style scoped>
 tr.running {
   background: rgba(22, 119, 255, 0.06);
+}
+tr.reconnecting {
+  background: rgba(250, 173, 20, 0.08);
 }
 tr.error {
   background: rgba(255, 77, 79, 0.06);
@@ -253,14 +315,21 @@ tr.error {
 .stream-name code {
   color: #69b1ff;
 }
-.name-input {
-  width: 120px;
+.name-input,
+.rtmp-input {
   font-size: 12px;
   padding: 2px 6px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 4px;
   color: inherit;
+}
+.name-input {
+  width: 120px;
+}
+.rtmp-input {
+  flex: 1;
+  min-width: 140px;
 }
 .btn.link {
   padding: 0 4px;
@@ -294,6 +363,10 @@ tr.error {
   color: #69b1ff;
   background: #111d2c;
 }
+.badge.reconnecting {
+  color: #faad14;
+  background: #2b2111;
+}
 .badge.error {
   color: #ff7875;
   background: #2a1215;
@@ -325,7 +398,8 @@ tr.error {
 .url-row .label {
   font-size: 10px;
   color: var(--text-muted);
-  width: 32px;
+  width: 36px;
+  flex-shrink: 0;
 }
 .url-row code {
   flex: 1;

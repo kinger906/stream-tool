@@ -15,6 +15,7 @@ static STREAM_NAME_RE: LazyLock<Regex> =
 pub enum StreamStatus {
     Idle,
     Running,
+    Reconnecting,
     Stopped,
     Error,
 }
@@ -26,6 +27,7 @@ pub enum SourceType {
     Camera,
     Display,
     Window,
+    Region,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,6 +70,27 @@ impl QualityPreset {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureRegion {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl CaptureRegion {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.width < 16 || self.height < 16 {
+            return Err("截取区域宽高至少为 16".to_string());
+        }
+        if self.width % 2 != 0 || self.height % 2 != 0 {
+            return Err("截取区域宽高需为偶数（便于 H.264 编码）".to_string());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureDevice {
@@ -93,20 +116,25 @@ pub struct StreamTaskInfo {
     pub loop_enabled: bool,
     pub copy_mode: bool,
     pub record_enabled: bool,
+    pub auto_reconnect: bool,
     pub quality_preset: QualityPreset,
     pub audio_device: Option<String>,
     pub window_title: Option<String>,
+    pub region: Option<CaptureRegion>,
+    pub rtmp_url: Option<String>,
     pub rtsp_url: String,
     pub hls_url: String,
     pub webrtc_url: String,
     pub rtsp_url_local: String,
     pub hls_url_local: String,
     pub webrtc_url_local: String,
+    pub public_hls_url: Option<String>,
     pub error: Option<String>,
     pub elapsed_secs: f64,
     pub duration_secs: Option<f64>,
     pub bitrate_kbps: Option<f64>,
     pub fps: Option<f64>,
+    pub reconnect_attempts: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +145,10 @@ pub struct AppSettings {
     pub rtsp_username: Option<String>,
     pub rtsp_password: Option<String>,
     pub record_dir: Option<String>,
+    pub auto_reconnect_default: bool,
+    /// Public HTTP base for HLS sharing, e.g. https://xxx.trycloudflare.com
+    pub public_base_url: Option<String>,
+    pub minimize_to_tray: bool,
 }
 
 impl Default for AppSettings {
@@ -127,6 +159,9 @@ impl Default for AppSettings {
             rtsp_username: None,
             rtsp_password: None,
             record_dir: None,
+            auto_reconnect_default: true,
+            public_base_url: None,
+            minimize_to_tray: true,
         }
     }
 }
@@ -151,6 +186,33 @@ pub struct SystemInfo {
     pub record_dir: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneStreamSpec {
+    pub stream_name: String,
+    pub filename: String,
+    pub path: String,
+    pub source_type: SourceType,
+    pub loop_enabled: bool,
+    pub copy_mode: bool,
+    pub record_enabled: bool,
+    pub auto_reconnect: bool,
+    pub quality_preset: QualityPreset,
+    pub audio_device: Option<String>,
+    pub window_title: Option<String>,
+    pub region: Option<CaptureRegion>,
+    pub rtmp_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScenePreset {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+    pub streams: Vec<SceneStreamSpec>,
+}
+
 #[derive(Clone)]
 pub struct InternalStreamTask {
     pub id: String,
@@ -162,15 +224,20 @@ pub struct InternalStreamTask {
     pub loop_enabled: bool,
     pub copy_mode: bool,
     pub record_enabled: bool,
+    pub auto_reconnect: bool,
     pub quality_preset: QualityPreset,
     pub audio_device: Option<String>,
     pub window_title: Option<String>,
+    pub region: Option<CaptureRegion>,
+    pub rtmp_url: Option<String>,
     pub error: Option<String>,
     pub elapsed_secs: f64,
     pub duration_secs: Option<f64>,
     pub bitrate_kbps: Option<f64>,
     pub fps: Option<f64>,
     pub using_transcode: bool,
+    pub reconnect_attempts: u32,
+    pub user_stopped: bool,
 }
 
 pub fn validate_stream_name(name: &str) -> Result<(), String> {
@@ -179,6 +246,18 @@ pub fn validate_stream_name(name: &str) -> Result<(), String> {
     } else {
         Err("流名称仅允许 2-32 位字母、数字、下划线或连字符".to_string())
     }
+}
+
+pub fn validate_rtmp_url(url: &str) -> Result<(), String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if !(lower.starts_with("rtmp://") || lower.starts_with("rtmps://")) {
+        return Err("RTMP 地址需以 rtmp:// 或 rtmps:// 开头".to_string());
+    }
+    Ok(())
 }
 
 pub fn slug_from_filename(name: &str) -> String {
@@ -201,12 +280,38 @@ pub fn slug_from_filename(name: &str) -> String {
 }
 
 impl InternalStreamTask {
+    pub fn to_scene_spec(&self) -> SceneStreamSpec {
+        SceneStreamSpec {
+            stream_name: self.stream_name.clone(),
+            filename: self.filename.clone(),
+            path: self.path.display().to_string(),
+            source_type: self.source_type.clone(),
+            loop_enabled: self.loop_enabled,
+            copy_mode: self.copy_mode,
+            record_enabled: self.record_enabled,
+            auto_reconnect: self.auto_reconnect,
+            quality_preset: self.quality_preset.clone(),
+            audio_device: self.audio_device.clone(),
+            window_title: self.window_title.clone(),
+            region: self.region.clone(),
+            rtmp_url: self.rtmp_url.clone(),
+        }
+    }
+
     pub fn to_info(&self, lan_ip: &str, settings: &AppSettings) -> StreamTaskInfo {
         let name = &self.stream_name;
         let auth = (
             settings.rtsp_username.as_deref(),
             settings.rtsp_password.as_deref(),
         );
+        let public_hls_url = settings
+            .public_base_url
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(|base| {
+                let base = base.trim_end_matches('/');
+                format!("{base}/{name}/index.m3u8")
+            });
 
         StreamTaskInfo {
             id: self.id.clone(),
@@ -218,20 +323,25 @@ impl InternalStreamTask {
             loop_enabled: self.loop_enabled,
             copy_mode: self.copy_mode,
             record_enabled: self.record_enabled,
+            auto_reconnect: self.auto_reconnect,
             quality_preset: self.quality_preset.clone(),
             audio_device: self.audio_device.clone(),
             window_title: self.window_title.clone(),
+            region: self.region.clone(),
+            rtmp_url: self.rtmp_url.clone(),
             rtsp_url: build_rtsp_url(lan_ip, name, auth.0, auth.1),
             hls_url: build_hls_url(lan_ip, name, auth.0, auth.1),
             webrtc_url: build_webrtc_url(lan_ip, name),
             rtsp_url_local: build_rtsp_url("127.0.0.1", name, auth.0, auth.1),
             hls_url_local: build_hls_url("127.0.0.1", name, auth.0, auth.1),
             webrtc_url_local: build_webrtc_url("127.0.0.1", name),
+            public_hls_url,
             error: self.error.clone(),
             elapsed_secs: self.elapsed_secs,
             duration_secs: self.duration_secs,
             bitrate_kbps: self.bitrate_kbps,
             fps: self.fps,
+            reconnect_attempts: self.reconnect_attempts,
         }
     }
 }

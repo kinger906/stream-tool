@@ -13,8 +13,10 @@ defineEmits<{
   toggleLoop: [id: string, enabled: boolean];
   toggleCopy: [id: string, copyMode: boolean];
   toggleRecord: [id: string, enabled: boolean];
+  toggleReconnect: [id: string, enabled: boolean];
   updateStreamName: [id: string, name: string];
   updateQuality: [id: string, preset: QualityPreset];
+  updateRtmp: [id: string, url: string];
 }>();
 </script>
 
@@ -26,7 +28,7 @@ defineEmits<{
           <th>视频 / 流名</th>
           <th>状态</th>
           <th>进度 / 码率</th>
-          <th>流地址（局域网）</th>
+          <th>流地址</th>
           <th>选项</th>
           <th>操作</th>
         </tr>
@@ -44,8 +46,10 @@ defineEmits<{
           @toggle-loop="$emit('toggleLoop', s.id, $event)"
           @toggle-copy="$emit('toggleCopy', s.id, $event)"
           @toggle-record="$emit('toggleRecord', s.id, $event)"
+          @toggle-reconnect="$emit('toggleReconnect', s.id, $event)"
           @update-stream-name="$emit('updateStreamName', s.id, $event)"
           @update-quality="$emit('updateQuality', s.id, $event)"
+          @update-rtmp="$emit('updateRtmp', s.id, $event)"
         />
       </tbody>
     </table>

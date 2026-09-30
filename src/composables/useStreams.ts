@@ -1,16 +1,32 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../api/tauri";
-import type { QualityPreset, SettingsUpdate, StreamTaskInfo, SystemInfo } from "../types";
+import type {
+  CaptureRegion,
+  QualityPreset,
+  ScenePreset,
+  SettingsUpdate,
+  StreamTaskInfo,
+  SystemInfo,
+} from "../types";
 
 export function useStreams() {
   const streams = ref<StreamTaskInfo[]>([]);
   const systemInfo = ref<SystemInfo | null>(null);
+  const scenes = ref<ScenePreset[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
 
   let unlisten: (() => void) | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
+
+  async function refreshScenes() {
+    try {
+      scenes.value = await api.listScenes();
+    } catch {
+      /* ignore */
+    }
+  }
 
   async function refresh() {
     try {
@@ -20,6 +36,7 @@ export function useStreams() {
       ]);
       streams.value = list;
       systemInfo.value = info;
+      await refreshScenes();
     } catch (e) {
       error.value = String(e);
     }
@@ -63,6 +80,16 @@ export function useStreams() {
     error.value = null;
     try {
       await api.addWindowStream(windowTitle, audioDevice ?? undefined);
+      await refresh();
+    } catch (e) {
+      error.value = String(e);
+    }
+  }
+
+  async function addRegion(region: CaptureRegion, audioDevice: string | null) {
+    error.value = null;
+    try {
+      await api.addRegionStream(region, audioDevice ?? undefined);
       await refresh();
     } catch (e) {
       error.value = String(e);
@@ -131,9 +158,24 @@ export function useStreams() {
     await refresh();
   }
 
+  async function toggleReconnect(id: string, enabled: boolean) {
+    await api.updateStream(id, { autoReconnect: enabled });
+    await refresh();
+  }
+
   async function updateQuality(id: string, qualityPreset: QualityPreset) {
     await api.updateStream(id, { qualityPreset });
     await refresh();
+  }
+
+  async function updateRtmpUrl(id: string, rtmpUrl: string) {
+    error.value = null;
+    try {
+      await api.updateStream(id, { rtmpUrl });
+      await refresh();
+    } catch (e) {
+      error.value = String(e);
+    }
   }
 
   async function updateSettings(update: SettingsUpdate) {
@@ -149,8 +191,29 @@ export function useStreams() {
     }
   }
 
-  async function updateMaxConcurrent(value: number) {
-    await updateSettings({ maxConcurrent: value });
+  async function saveScene(name: string) {
+    error.value = null;
+    try {
+      await api.saveScene(name);
+      await refreshScenes();
+    } catch (e) {
+      error.value = String(e);
+    }
+  }
+
+  async function deleteScene(id: string) {
+    await api.deleteScene(id);
+    await refreshScenes();
+  }
+
+  async function applyScene(id: string, replace = true) {
+    error.value = null;
+    try {
+      await api.applyScene(id, replace);
+      await refresh();
+    } catch (e) {
+      error.value = String(e);
+    }
   }
 
   onMounted(async () => {
@@ -169,6 +232,7 @@ export function useStreams() {
   return {
     streams,
     systemInfo,
+    scenes,
     loading,
     error,
     refresh,
@@ -176,6 +240,7 @@ export function useStreams() {
     addCamera,
     addDisplay,
     addWindow,
+    addRegion,
     start,
     stop,
     startAll,
@@ -185,8 +250,12 @@ export function useStreams() {
     toggleCopyMode,
     updateStreamName,
     toggleRecord,
+    toggleReconnect,
     updateQuality,
+    updateRtmpUrl,
     updateSettings,
-    updateMaxConcurrent,
+    saveScene,
+    deleteScene,
+    applyScene,
   };
 }

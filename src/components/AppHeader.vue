@@ -15,7 +15,7 @@ defineEmits<{
   <header class="header">
     <div class="brand">
       <h1>视频推流工具</h1>
-      <p class="subtitle">文件 / 摄像头 / 桌面 / 窗口 → RTSP / HLS / WebRTC，支持录制与认证</p>
+      <p class="subtitle">文件 / 摄像头 / 桌面 / 窗口 / 区域 → RTSP · HLS · WebRTC · RTMP</p>
     </div>
     <div class="meta" v-if="systemInfo">
       <div class="chip" :class="{ ok: systemInfo.mediamtxRunning }">

@@ -3,6 +3,8 @@ import type {
   AppSettings,
   CaptureDevice,
   CaptureDevices,
+  CaptureRegion,
+  ScenePreset,
   SettingsUpdate,
   StreamTaskInfo,
   StreamUpdate,
@@ -30,6 +32,11 @@ export const api = {
       windowTitle,
       audioDevice: audioDevice ?? null,
     }),
+  addRegionStream: (region: CaptureRegion, audioDevice?: string) =>
+    invoke<StreamTaskInfo>("add_region_stream", {
+      region,
+      audioDevice: audioDevice ?? null,
+    }),
   startStream: (id: string) => invoke<StreamTaskInfo>("start_stream", { id }),
   stopStream: (id: string) => invoke<StreamTaskInfo>("stop_stream", { id }),
   startAllStreams: () => invoke<StreamTaskInfo[]>("start_all_streams"),
@@ -39,5 +46,10 @@ export const api = {
     invoke<StreamTaskInfo>("update_stream", { id, ...update }),
   updateSettings: (update: SettingsUpdate) =>
     invoke<AppSettings>("update_settings", { ...update }),
+  listScenes: () => invoke<ScenePreset[]>("list_scenes"),
+  saveScene: (name: string) => invoke<ScenePreset>("save_scene", { name }),
+  deleteScene: (id: string) => invoke<void>("delete_scene", { id }),
+  applyScene: (id: string, replace = true) =>
+    invoke<StreamTaskInfo[]>("apply_scene", { id, replace }),
   startMediamtx: () => invoke<void>("start_mediamtx"),
 };
